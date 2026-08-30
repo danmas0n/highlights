@@ -30,6 +30,10 @@ actor HighlightExtractor {
         let fileURL: URL
         let assetIdentifier: String?
         let renderSize: CGSize
+        /// Which strategy actually produced the file, so the UI can be honest about it.
+        let strategyLabel: String
+        /// False when the export had to fall back past the crop to succeed at all.
+        let croppedAsRequested: Bool
     }
 
     /// Narrow escape hatch for carrying a non-Sendable reference into a child task where the
@@ -102,6 +106,14 @@ actor HighlightExtractor {
 
     // MARK: - Export
 
+    /// One way of trying to produce the file, in descending order of ambition.
+    private struct Strategy {
+        let label: String
+        let preset: String
+        /// Passthrough ignores a video composition entirely, so a crop can't survive it.
+        let appliesCrop: Bool
+    }
+
     func export(
         highlight: Highlight,
         quality: CaptureSettings.ExportQuality,
@@ -116,128 +128,129 @@ actor HighlightExtractor {
         guard let videoTrack = composition.tracks(withMediaType: .video).first else {
             throw ExtractError.noVideoTrack
         }
+        let naturalSize = (try? await videoTrack.load(.naturalSize)) ?? .zero
+        let preferredTransform = (try? await videoTrack.load(.preferredTransform)) ?? .identity
 
+        // Only composite when the crop actually does something. An uncropped export is the common
+        // case, and compositing it means re-rendering every 4K frame to produce a pixel-identical
+        // result.
         let cropPath = highlight.cropPath ?? .fixed(widthFraction: 1.0)
+        let wantsCrop = !cropPath.isFullFrame
 
-        // Only build a video composition when the crop actually does something. An uncropped
-        // export is the common case — you framed it wide and it was fine — and compositing it
-        // means re-rendering every 4K frame to produce a pixel-identical result. Skipping it is
-        // faster, cooler, and removes an entire class of "invalid video composition" failure
-        // from the path most exports take.
-        let videoComposition: AVMutableVideoComposition?
-        if cropPath.isFullFrame {
-            videoComposition = nil
-        } else {
-            videoComposition = ClipComposer.makeVideoComposition(
+        var videoComposition: AVMutableVideoComposition?
+        if wantsCrop {
+            let built = ClipComposer.makeVideoComposition(
                 track: videoTrack,
-                naturalSize: try await videoTrack.load(.naturalSize),
-                preferredTransform: try await videoTrack.load(.preferredTransform),
+                naturalSize: naturalSize,
+                preferredTransform: preferredTransform,
                 cropPath: cropPath,
                 quality: quality,
                 duration: composition.duration
             )
-        }
-
-        let outputURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent("highlight-\(highlight.id.uuidString).mov")
-        try? FileManager.default.removeItem(at: outputURL)
-
-        // Without a composition to set the size, the preset has to do the downscaling itself.
-        let presetName: String
-        if videoComposition == nil, quality == .fullHD {
-            presetName = AVAssetExportPreset1920x1080
-        } else {
-            presetName = AVAssetExportPresetHEVCHighestQuality
-        }
-
-        // The initialiser returns nil for a preset this asset can't use, which is a cheaper and
-        // less deprecated compatibility check than asking for the whole list.
-        var resolvedPreset = presetName
-        var made = AVAssetExportSession(asset: composition, presetName: presetName)
-        if made == nil {
-            captureLog.error("preset \(presetName, privacy: .public) unavailable; falling back")
-            resolvedPreset = AVAssetExportPresetHighestQuality
-            made = AVAssetExportSession(asset: composition, presetName: resolvedPreset)
-        }
-        guard let session = made else {
-            throw ExtractError.exportFailed("Couldn't create an export session.")
-        }
-        session.outputURL = outputURL
-        session.outputFileType = .mov
-        session.videoComposition = videoComposition
-        session.shouldOptimizeForNetworkUse = true
-
-        // Ask AVFoundation to check the composition before it refuses to export it. Its own
-        // failure surfaces as the useless string "Operation Stopped"; the validation delegate
-        // names the offending instruction instead.
-        if let videoComposition {
+            // Ask AVFoundation why it dislikes a composition *before* it refuses to export one:
+            // its own failure surfaces as the useless string "Operation Stopped".
             let validator = VideoCompositionValidator()
-            let valid = (try? await videoComposition.isValid(
+            let valid = (try? await built.isValid(
                 for: composition,
                 timeRange: CMTimeRange(start: .zero, duration: composition.duration),
                 validationDelegate: validator
             )) ?? false
             if !valid {
-                captureLog.error("""
-                    invalid video composition: \(validator.summary, privacy: .public) \
-                    renderSize=\(Int(videoComposition.renderSize.width), privacy: .public)×\
-                    \(Int(videoComposition.renderSize.height), privacy: .public) \
-                    duration=\(composition.duration.seconds, privacy: .public)s
+                report("""
+                    invalid video composition (\(validator.summary)) \
+                    renderSize=\(Int(built.renderSize.width))x\(Int(built.renderSize.height))
                     """)
             }
+            videoComposition = built
         }
 
-        // `AVAssetExportSession` isn't Sendable, but reading `.progress` while the export runs is
-        // exactly what the property is for. Box it rather than making the whole method
-        // non-concurrent for a progress bar.
-        let progressTask = progress.map { report -> Task<Void, Never> in
-            let box = UncheckedBox(session)
-            return Task {
-                while !Task.isCancelled {
-                    report(box.value.progress)
-                    try? await Task.sleep(for: .milliseconds(200))
+        // Ordered from "exactly what was asked for" down to "something you can actually watch".
+        // The point is that a failure shouldn't cost you the highlight: worst case you get an
+        // uncropped clip and a note saying so, rather than an error and nothing.
+        var strategies: [Strategy] = []
+        if wantsCrop {
+            strategies.append(Strategy(label: "HEVC + crop", preset: AVAssetExportPresetHEVCHighestQuality, appliesCrop: true))
+            strategies.append(Strategy(label: "H.264 + crop", preset: AVAssetExportPresetHighestQuality, appliesCrop: true))
+        } else if quality == .fullHD {
+            strategies.append(Strategy(label: "1080p", preset: AVAssetExportPreset1920x1080, appliesCrop: false))
+        }
+        strategies.append(Strategy(label: "HEVC", preset: AVAssetExportPresetHEVCHighestQuality, appliesCrop: false))
+        strategies.append(Strategy(label: "H.264", preset: AVAssetExportPresetHighestQuality, appliesCrop: false))
+        strategies.append(Strategy(label: "passthrough", preset: AVAssetExportPresetPassthrough, appliesCrop: false))
+
+        let outputURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("highlight-\(highlight.id.uuidString).mov")
+
+        var lastFailure = "unknown error"
+        for strategy in strategies {
+            try? FileManager.default.removeItem(at: outputURL)
+
+            guard let session = AVAssetExportSession(asset: composition, presetName: strategy.preset) else {
+                report("\(strategy.label): preset unavailable for this asset")
+                lastFailure = "\(strategy.label): preset unavailable"
+                continue
+            }
+            session.outputURL = outputURL
+            session.outputFileType = .mov
+            session.videoComposition = strategy.appliesCrop ? videoComposition : nil
+            session.shouldOptimizeForNetworkUse = true
+
+            let progressTask = progress.map { report -> Task<Void, Never> in
+                let box = UncheckedBox(session)
+                return Task {
+                    while !Task.isCancelled {
+                        report(box.value.progress)
+                        try? await Task.sleep(for: .milliseconds(200))
+                    }
                 }
             }
-        }
-        defer { progressTask?.cancel() }
+            await session.export()
+            progressTask?.cancel()
 
-        await session.export()
+            if session.status == .completed {
+                progress?(1.0)
+                let renderSize = strategy.appliesCrop
+                    ? (videoComposition?.renderSize ?? naturalSize)
+                    : naturalSize
+                report("""
+                    exported via \(strategy.label): \(composition.duration.seconds)s \
+                    at \(Int(renderSize.width))x\(Int(renderSize.height))
+                    """)
 
-        guard session.status == .completed else {
-            // "Operation Stopped" is AVFoundation's catch-all description for several distinct
-            // failures, so log the domain and code — that's what actually identifies the cause.
+                var identifier: String?
+                if saveToPhotoLibrary {
+                    identifier = try await saveToLibrary(outputURL)
+                }
+                return Output(
+                    fileURL: outputURL,
+                    assetIdentifier: identifier,
+                    renderSize: renderSize,
+                    strategyLabel: strategy.label,
+                    croppedAsRequested: strategy.appliesCrop || !wantsCrop
+                )
+            }
+
+            // "Operation Stopped" is AVFoundation's catch-all description for several unrelated
+            // failures, so the domain and code are what actually identify the cause.
             let error = session.error as NSError?
-            captureLog.error("""
-                export failed: \(error?.domain ?? "?", privacy: .public) \
-                code=\(error?.code ?? 0, privacy: .public) \
-                "\(error?.localizedDescription ?? "unknown", privacy: .public)" \
-                underlying=\(String(describing: error?.userInfo[NSUnderlyingErrorKey]), privacy: .public) \
-                preset=\(resolvedPreset, privacy: .public) \
-                composited=\(videoComposition != nil, privacy: .public)
-                """)
-            throw ExtractError.exportFailed(
-                session.error?.localizedDescription ?? "unknown error"
-            )
+            let detail = "\(error?.domain ?? "?") \(error?.code ?? 0): \(error?.localizedDescription ?? "unknown")"
+            report("\(strategy.label) failed — \(detail)")
+            if let underlying = error?.userInfo[NSUnderlyingErrorKey] {
+                report("  underlying: \(underlying)")
+            }
+            lastFailure = detail
         }
-        progress?(1.0)
-        // Bound separately: `??` takes an autoclosure, which can't contain an `await`.
-        let naturalSize = (try? await videoTrack.load(.naturalSize)) ?? .zero
-        let renderSize = videoComposition?.renderSize ?? naturalSize
-        captureLog.info("""
-            exported \(composition.duration.seconds, privacy: .public)s at \
-            \(Int(renderSize.width), privacy: .public)×\(Int(renderSize.height), privacy: .public) \
-            preset=\(resolvedPreset, privacy: .public)
-            """)
 
-        var identifier: String?
-        if saveToPhotoLibrary {
-            identifier = try await saveToLibrary(outputURL)
-        }
-        return Output(
-            fileURL: outputURL,
-            assetIdentifier: identifier,
-            renderSize: renderSize
-        )
+        throw ExtractError.exportFailed(lastFailure)
+    }
+
+    /// Writes to both the unified log and stdout.
+    ///
+    /// `devicectl --console` only relays stdout, so `Logger` alone is invisible over a cable —
+    /// which is exactly when you most want to read it.
+    private nonisolated func report(_ message: String) {
+        captureLog.error("\(message, privacy: .public)")
+        print("[highlights] \(message)")
     }
 
     // MARK: - Photos

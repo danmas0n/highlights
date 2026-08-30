@@ -45,6 +45,9 @@ enum ClipComposer {
         if let track = trimmed.tracks(withMediaType: .video).first, let transform {
             track.preferredTransform = transform
         }
+        // Trimming can empty a track too — an audio tail shorter than the video means a window
+        // near the end may contain no audio at all.
+        removeEmptyTracks(from: trimmed)
 
         captureLog.info("""
             composed \(clip.parts.count, privacy: .public) parts → \
@@ -100,7 +103,21 @@ enum ClipComposer {
 
         guard cursor > .zero else { throw ComposeError.emptyWindow }
         if let transform { stitchedVideo.preferredTransform = transform }
+        removeEmptyTracks(from: stitched)
         return stitched
+    }
+
+    /// Drops tracks that ended up with no media in them.
+    ///
+    /// The audio track is created up front and filled best-effort, so a clip whose fragments
+    /// carried no usable audio leaves a zero-length track behind. `AVPlayer` shrugs at that, which
+    /// is why preview always looked fine, but `AVAssetExportSession` can refuse the whole export —
+    /// reporting only the catch-all "Operation Stopped".
+    private static func removeEmptyTracks(from composition: AVMutableComposition) {
+        for track in composition.tracks where track.timeRange.duration <= .zero || track.segments.isEmpty {
+            captureLog.error("dropping empty \(track.mediaType.rawValue, privacy: .public) track")
+            composition.removeTrack(track)
+        }
     }
 
     // MARK: - Crop compositing

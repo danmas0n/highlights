@@ -437,7 +437,9 @@ struct HighlightEditorView: View {
             // Note: the footage is deliberately *not* released here. The exported clip is cropped
             // and flattened; the local copy is the only way back to the full 4K frame.
             await model.releaseFootageIfConfigured(for: highlight)
-            status = "Saved \(Int(output.renderSize.width))×\(Int(output.renderSize.height)) to your camera roll."
+            status = output.croppedAsRequested
+                ? "Saved \(Int(output.renderSize.width))×\(Int(output.renderSize.height)) to your camera roll."
+                : "Saved to your camera roll, but the crop couldn't be applied — this clip is the full frame."
         } catch {
             errorMessage = error.localizedDescription
         }
