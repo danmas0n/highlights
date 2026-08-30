@@ -7,6 +7,15 @@ import UIKit
 /// start-up path and every fault are traceable after the fact via Console or `log show`.
 let captureLog = Logger(subsystem: "com.danmason.highlights", category: "capture")
 
+/// Writes to both the unified log and stdout.
+///
+/// `devicectl --console` only relays stdout, so `Logger` alone is invisible over a cable — which
+/// is exactly when you most want to read it.
+func captureReport(_ message: String) {
+    captureLog.log("\(message, privacy: .public)")
+    print("[highlights] \(message)")
+}
+
 /// Coordinates the capture session, the continuous encode, and the segment store, and publishes
 /// the handful of things the UI needs to show.
 ///
@@ -62,6 +71,10 @@ final class CaptureEngine {
     private let observers = NotificationObserverBag()
     private var diskPollTask: Task<Void, Never>?
     private var watchdogTask: Task<Void, Never>?
+    /// Detaching the recording outputs is asynchronous, so a quick stop-then-start could otherwise
+    /// let the teardown land *after* the next recording had attached — silently removing the
+    /// outputs from a session that had just started.
+    private var outputTeardown: Task<Void, Never>?
 
     /// How long without a video frame before we call it stalled. Long enough not to trip on a
     /// momentary hitch, short enough that you find out during the warm-up rather than at halftime.
@@ -146,6 +159,7 @@ final class CaptureEngine {
 
     func startRecording() async {
         guard state == .standby else { return }
+        await outputTeardown?.value
 
         do {
             let sessionID = try await store.beginSession()
@@ -186,7 +200,7 @@ final class CaptureEngine {
         let controller = sessionController
         let proxy = outputProxy
         let queue = writerQueue
-        Task {
+        outputTeardown = Task {
             await controller.setRecordingActive(
                 false, sampleBufferDelegate: proxy, recorderQueue: queue
             )

@@ -103,6 +103,10 @@ enum ClipComposer {
 
         guard cursor > .zero else { throw ComposeError.emptyWindow }
         if let transform { stitchedVideo.preferredTransform = transform }
+        captureReport("""
+            stitched \(parts.count) parts: video=\(stitchedVideo.timeRange.duration.seconds)s \
+            audio=\(stitchedAudio?.timeRange.duration.seconds ?? -1)s
+            """)
         removeEmptyTracks(from: stitched)
         return stitched
     }
@@ -115,7 +119,7 @@ enum ClipComposer {
     /// reporting only the catch-all "Operation Stopped".
     private static func removeEmptyTracks(from composition: AVMutableComposition) {
         for track in composition.tracks where track.timeRange.duration <= .zero || track.segments.isEmpty {
-            captureLog.error("dropping empty \(track.mediaType.rawValue, privacy: .public) track")
+            captureReport("dropping empty \(track.mediaType.rawValue) track")
             composition.removeTrack(track)
         }
     }

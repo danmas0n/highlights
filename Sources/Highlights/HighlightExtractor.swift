@@ -156,7 +156,7 @@ actor HighlightExtractor {
                 validationDelegate: validator
             )) ?? false
             if !valid {
-                report("""
+                captureReport("""
                     invalid video composition (\(validator.summary)) \
                     renderSize=\(Int(built.renderSize.width))x\(Int(built.renderSize.height))
                     """)
@@ -186,7 +186,7 @@ actor HighlightExtractor {
             try? FileManager.default.removeItem(at: outputURL)
 
             guard let session = AVAssetExportSession(asset: composition, presetName: strategy.preset) else {
-                report("\(strategy.label): preset unavailable for this asset")
+                captureReport("\(strategy.label): preset unavailable for this asset")
                 lastFailure = "\(strategy.label): preset unavailable"
                 continue
             }
@@ -195,11 +195,11 @@ actor HighlightExtractor {
             session.videoComposition = strategy.appliesCrop ? videoComposition : nil
             session.shouldOptimizeForNetworkUse = true
 
-            let progressTask = progress.map { report -> Task<Void, Never> in
+            let progressTask = progress.map { reportProgress -> Task<Void, Never> in
                 let box = UncheckedBox(session)
                 return Task {
                     while !Task.isCancelled {
-                        report(box.value.progress)
+                        reportProgress(box.value.progress)
                         try? await Task.sleep(for: .milliseconds(200))
                     }
                 }
@@ -212,7 +212,7 @@ actor HighlightExtractor {
                 let renderSize = strategy.appliesCrop
                     ? (videoComposition?.renderSize ?? naturalSize)
                     : naturalSize
-                report("""
+                captureReport("""
                     exported via \(strategy.label): \(composition.duration.seconds)s \
                     at \(Int(renderSize.width))x\(Int(renderSize.height))
                     """)
@@ -234,23 +234,14 @@ actor HighlightExtractor {
             // failures, so the domain and code are what actually identify the cause.
             let error = session.error as NSError?
             let detail = "\(error?.domain ?? "?") \(error?.code ?? 0): \(error?.localizedDescription ?? "unknown")"
-            report("\(strategy.label) failed — \(detail)")
+            captureReport("\(strategy.label) failed — \(detail)")
             if let underlying = error?.userInfo[NSUnderlyingErrorKey] {
-                report("  underlying: \(underlying)")
+                captureReport("  underlying: \(underlying)")
             }
             lastFailure = detail
         }
 
         throw ExtractError.exportFailed(lastFailure)
-    }
-
-    /// Writes to both the unified log and stdout.
-    ///
-    /// `devicectl --console` only relays stdout, so `Logger` alone is invisible over a cable —
-    /// which is exactly when you most want to read it.
-    private nonisolated func report(_ message: String) {
-        captureLog.error("\(message, privacy: .public)")
-        print("[highlights] \(message)")
     }
 
     // MARK: - Photos

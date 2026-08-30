@@ -50,6 +50,12 @@ final class SegmentRecorder: NSObject, @unchecked Sendable {
     /// the session start either way.
     private var segmentOrigin: CMTime?
 
+    /// Sample tallies, so "are we capturing audio?" is a question with an answer rather than a
+    /// guess made from a downstream symptom.
+    private var videoSamples = 0
+    private var audioSamples = 0
+    private var audioDropped = 0
+
     /// Wall-clock stamp of the last video sample, for the stall watchdog. Read from another
     /// thread, so it gets its own lock rather than relying on the queue discipline.
     private let frameClock = NSLock()
@@ -114,7 +120,12 @@ final class SegmentRecorder: NSObject, @unchecked Sendable {
             AVEncoderBitRateKey: 64_000,
         ])
         audio.expectsMediaDataInRealTime = true
-        if writer.canAdd(audio) { writer.add(audio); audioInput = audio }
+        if writer.canAdd(audio) {
+            writer.add(audio)
+            audioInput = audio
+        } else {
+            captureReport("audio: writer REFUSED the audio input")
+        }
 
         guard writer.startWriting() else {
             throw RecorderError.startFailed(writer.error?.localizedDescription ?? "unknown")
@@ -122,6 +133,9 @@ final class SegmentRecorder: NSObject, @unchecked Sendable {
 
         self.writer = writer
         self.videoInput = video
+        self.videoSamples = 0
+        self.audioSamples = 0
+        self.audioDropped = 0
         self.sessionStartPTS = nil
         self.segmentCursor = .zero
         self.segmentOrigin = nil
@@ -134,6 +148,10 @@ final class SegmentRecorder: NSObject, @unchecked Sendable {
                 completion()
                 return
             }
+            captureReport("""
+                recorded \(self.videoSamples) video / \(self.audioSamples) audio samples \
+                (\(self.audioDropped) audio dropped)
+                """)
             self.videoInput?.markAsFinished()
             self.audioInput?.markAsFinished()
             writer.finishWriting { completion() }
@@ -171,8 +189,17 @@ final class SegmentRecorder: NSObject, @unchecked Sendable {
         }
 
         let input = isVideo ? videoInput : audioInput
-        guard let input, input.isReadyForMoreMediaData else { return }
+        guard let input, input.isReadyForMoreMediaData else {
+            if !isVideo {
+                audioDropped += 1
+                if audioDropped == 1 {
+                    captureReport("audio: first buffer dropped (input=\(audioInput != nil), ready=\(audioInput?.isReadyForMoreMediaData ?? false))")
+                }
+            }
+            return
+        }
         input.append(sampleBuffer)
+        if isVideo { videoSamples += 1 } else { audioSamples += 1 }
 
         if isVideo, let start = sessionStartPTS {
             frameClock.withLock { _lastVideoSampleAt = Date() }

@@ -72,11 +72,16 @@ final class CaptureSessionController: @unchecked Sendable {
                 if active {
                     guard videoDataOutput == nil else { return }
 
-                    if let device = AVCaptureDevice.default(for: .audio),
-                       let input = try? AVCaptureDeviceInput(device: device),
-                       session.canAddInput(input) {
-                        session.addInput(input)
-                        audioInput = input
+                    if let device = AVCaptureDevice.default(for: .audio) {
+                        if let input = try? AVCaptureDeviceInput(device: device),
+                           session.canAddInput(input) {
+                            session.addInput(input)
+                            audioInput = input
+                        } else {
+                            captureReport("audio: microphone input REFUSED by session")
+                        }
+                    } else {
+                        captureReport("audio: no microphone device")
                     }
 
                     let videoOut = AVCaptureVideoDataOutput()
@@ -113,7 +118,13 @@ final class CaptureSessionController: @unchecked Sendable {
                     if session.canAddOutput(audioOut) {
                         session.addOutput(audioOut)
                         audioDataOutput = audioOut
+                    } else {
+                        captureReport("audio: data output REFUSED by session")
                     }
+                    captureReport("""
+                        audio wiring: input=\(audioInput != nil) output=\(audioDataOutput != nil) \
+                        authorized=\(AVCaptureDevice.authorizationStatus(for: .audio).rawValue)
+                        """)
                 } else {
                     // Clear the delegates before removing, so no buffer can arrive mid-teardown.
                     videoDataOutput?.setSampleBufferDelegate(nil, queue: nil)
