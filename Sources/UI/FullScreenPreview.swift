@@ -30,11 +30,16 @@ struct FullScreenPreview: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var showingCrop = true
+    /// Size the video actually occupies on screen, so drags map 1:1 to what you can see.
+    @State private var displayedFrame: CGSize = .zero
     @State private var playhead: Double = 0
     @State private var isScrubbing = false
     @State private var timeObserver: Any?
     /// Live feedback during a pinch, before the crop is committed and the composition rebuilt.
     @State private var pinchScale: Double = 1
+    /// Where the crop sat when the current drag began. Adding a gesture's cumulative translation
+    /// to an already-updated centre compounds every frame and runs away from your finger.
+    @State private var dragAnchor: CGPoint?
 
     var body: some View {
         ZStack {
@@ -44,6 +49,17 @@ struct FullScreenPreview: View {
                 .disabled(true)
                 .ignoresSafeArea()
                 .overlay { if !showingCrop { cropOverlay } }
+                // Measure the displayed video separately from drawing it, so drags can map 1:1
+                // to what's on screen without writing state during a body evaluation.
+                .background {
+                    GeometryReader { geometry in
+                        Color.clear
+                            .onAppear { displayedFrame = videoFrame(in: geometry.size) }
+                            .onChange(of: geometry.size) { _, size in
+                                displayedFrame = videoFrame(in: size)
+                            }
+                    }
+                }
                 .gesture(showingCrop ? nil : framingGesture)
 
             VStack {
@@ -87,10 +103,20 @@ struct FullScreenPreview: View {
 
             Spacer()
 
-            Text(String(format: "%.1f×", 1.0 / cropWidth))
-                .font(.callout.monospacedDigit().weight(.semibold))
-                .padding(.horizontal, 14).padding(.vertical, 9)
-                .background(.ultraThinMaterial, in: Capsule())
+            Button {
+                cropCenter = CGPoint(x: 0.5, y: 0.5)
+                cropWidth = 1.0
+                pinchScale = 1
+                dragAnchor = nil
+                Task { await applyCropComposition() }
+            } label: {
+                Text(String(format: "%.1f×", 1.0 / cropWidth))
+                    .font(.callout.monospacedDigit().weight(.semibold))
+                    .padding(.horizontal, 14).padding(.vertical, 9)
+                    .background(.ultraThinMaterial, in: Capsule())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Reset zoom to full frame")
         }
     }
 
@@ -145,7 +171,7 @@ struct FullScreenPreview: View {
                         x: (geometry.size.width - frame.width) / 2 + effective.x * frame.width,
                         y: (geometry.size.height - frame.height) / 2 + effective.y * frame.height
                     )
-                Text("drag to move · pinch to zoom")
+                Text("drag to move · pinch to zoom · tap the zoom badge to reset")
                     .font(.caption2)
                     .foregroundStyle(.white.opacity(0.5))
                     .position(x: geometry.size.width / 2, y: geometry.size.height - 96)
@@ -164,11 +190,16 @@ struct FullScreenPreview: View {
         SimultaneousGesture(
             DragGesture()
                 .onChanged { value in
+                    let anchor = dragAnchor ?? cropCenter
+                    if dragAnchor == nil { dragAnchor = anchor }
+                    // 1:1 with the finger against the displayed frame, so the box tracks your
+                    // touch instead of drifting at some arbitrary rate.
                     cropCenter = CGPoint(
-                        x: clamp(cropCenter.x + value.translation.width / 6000),
-                        y: clamp(cropCenter.y + value.translation.height / 6000)
+                        x: clamp(anchor.x + value.translation.width / max(displayedFrame.width, 1)),
+                        y: clamp(anchor.y + value.translation.height / max(displayedFrame.height, 1))
                     )
-                },
+                }
+                .onEnded { _ in dragAnchor = nil },
             MagnifyGesture()
                 .onChanged { value in pinchScale = value.magnification }
                 .onEnded { value in

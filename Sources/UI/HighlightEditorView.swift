@@ -27,6 +27,10 @@ struct HighlightEditorView: View {
     @State private var trimEnd: Double = 0
 
     @State private var cropCenter = CGPoint(x: 0.5, y: 0.5)
+    /// Where the crop sat when the current drag began. Without an anchor, adding the gesture's
+    /// cumulative translation to an already-updated centre compounds every frame and the box
+    /// accelerates away from your finger.
+    @State private var cropDragAnchor: CGPoint?
     @State private var cropWidth: Double = 0.5
     @State private var isTracking = false
     @State private var isExporting = false
@@ -131,12 +135,15 @@ struct HighlightEditorView: View {
                             .onChanged { value in
                                 // Dragging by hand replaces any tracked camera move — you can't
                                 // meaningfully nudge a path that's moving underneath you.
+                                let anchor = cropDragAnchor ?? live
+                                if cropDragAnchor == nil { cropDragAnchor = anchor }
                                 cropCenter = CGPoint(
-                                    x: clamp(live.x + value.translation.width / frame.width / 40),
-                                    y: clamp(live.y + value.translation.height / frame.height / 40)
+                                    x: clamp(anchor.x + value.translation.width / frame.width),
+                                    y: clamp(anchor.y + value.translation.height / frame.height)
                                 )
                                 highlight.cropPath = .fixed(center: cropCenter, widthFraction: cropWidth)
                             }
+                            .onEnded { _ in cropDragAnchor = nil }
                     )
             }
             .allowsHitTesting(!isTracking)
@@ -219,9 +226,15 @@ struct HighlightEditorView: View {
                 if playhead > new { seek(trimStart) }
             }
 
-            Text("Drag the handles to trim. Tap the video for a full-screen look.")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
+            HStack {
+                Text("Drag the handles to trim. Tap the video for a full-screen look.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Button("Reset trim") { resetTrim() }
+                    .font(.caption2.weight(.semibold))
+                    .disabled(trimStart <= 0.01 && trimEnd >= windowDuration - 0.01)
+            }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
@@ -254,14 +267,12 @@ struct HighlightEditorView: View {
                 }
                 .disabled(isTracking || clip == nil)
 
-                if highlight.cropPath?.isStatic == false {
-                    Button(role: .destructive) {
-                        highlight.cropPath = .fixed(center: cropCenter, widthFraction: cropWidth)
-                        status = nil
-                    } label: {
-                        Label("Clear camera move", systemImage: "arrow.uturn.backward")
-                    }
+                Button {
+                    resetCrop()
+                } label: {
+                    Label("Reset zoom to full frame", systemImage: "arrow.uturn.backward")
                 }
+                .disabled(cropWidth >= 0.999 && highlight.cropPath?.isStatic != false)
             }
 
             Section {
@@ -347,6 +358,29 @@ struct HighlightEditorView: View {
             captureLog.error("preview failed: \(error.localizedDescription, privacy: .public)")
             errorMessage = error.localizedDescription
         }
+    }
+
+    /// Restores the full captured window. The escape hatch for a trim that got away from you.
+    private func resetTrim() {
+        trimStart = 0
+        trimEnd = windowDuration
+        highlight.trimStart = 0
+        highlight.trimEnd = windowDuration
+        player?.currentItem?.forwardPlaybackEndTime =
+            CMTime(seconds: windowDuration, preferredTimescale: 600)
+        seek(0)
+    }
+
+    /// Back to the whole frame, and back to a fixed crop if auto-follow had taken over.
+    ///
+    /// Clearing to nil rather than a full-frame path matters: an absent crop lets the exporter
+    /// skip compositing altogether.
+    private func resetCrop() {
+        cropCenter = CGPoint(x: 0.5, y: 0.5)
+        cropWidth = 1.0
+        cropDragAnchor = nil
+        highlight.cropPath = nil
+        status = nil
     }
 
     private func seek(_ seconds: Double) {
