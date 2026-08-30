@@ -27,6 +27,11 @@ struct CropPath: Codable, Equatable {
 
     var isStatic: Bool { keyframes.count <= 1 }
 
+    /// True when this crop keeps the whole frame, so exporting it needs no compositing at all.
+    var isFullFrame: Bool {
+        isStatic && (keyframes.first?.widthFraction ?? 1) >= 0.999
+    }
+
     /// Crop rect in normalized source coordinates at a given time, clamped to stay inside frame.
     func rect(at time: Double, sourceAspect: Double) -> CGRect {
         let key = interpolated(at: time)

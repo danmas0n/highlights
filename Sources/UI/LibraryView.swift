@@ -6,6 +6,7 @@ struct LibraryView: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var editing: Highlight?
+    @AppStorage("clips.sortOrder") private var sortOrderRaw = HighlightLibrary.SortOrder.oldestFirst.rawValue
     @State private var exportingAll = false
     @State private var exportProgress: (done: Int, total: Int)?
     @State private var errorMessage: String?
@@ -30,8 +31,18 @@ struct LibraryView: View {
                     Button("Done") { dismiss() }
                 }
                 ToolbarItem(placement: .primaryAction) {
-                    Button("Export All") { Task { await exportAll() } }
-                        .disabled(model.library.highlights.isEmpty || exportingAll)
+                    Menu {
+                        Picker("Sort", selection: $sortOrderRaw) {
+                            ForEach(HighlightLibrary.SortOrder.allCases, id: \.rawValue) { order in
+                                Text(order.label).tag(order.rawValue)
+                            }
+                        }
+                        Divider()
+                        Button("Export All") { Task { await exportAll() } }
+                            .disabled(model.library.highlights.isEmpty || exportingAll)
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
+                    }
                 }
             }
             .sheet(item: $editing) { HighlightEditorView(highlight: $0) }
@@ -54,7 +65,7 @@ struct LibraryView: View {
 
     private var list: some View {
         List {
-            ForEach(model.library.sorted) { highlight in
+            ForEach(sortedHighlights) { highlight in
                 Button {
                     editing = highlight
                 } label: {
@@ -68,11 +79,13 @@ struct LibraryView: View {
                         }
 
                         VStack(alignment: .leading, spacing: 3) {
+                            // Lead with the wall clock. "Mark at 0:32" is ambiguous once there's
+                            // more than one recording, since each starts counting from zero again.
                             Text(highlight.title.isEmpty
-                                 ? "Mark at \(timecode(highlight.triggerSeconds))"
+                                 ? highlight.markedAt.formatted(date: .omitted, time: .shortened)
                                  : highlight.title)
                                 .font(.body.weight(.medium))
-                            Text("\(Int(highlight.durationSeconds))s · \(highlight.markedAt.formatted(date: .omitted, time: .shortened))")
+                            Text("\(Int(highlight.trimmedDurationSeconds))s")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
@@ -92,8 +105,7 @@ struct LibraryView: View {
                 .buttonStyle(.plain)
             }
             .onDelete { indexSet in
-                let sorted = model.library.sorted
-                let doomed = indexSet.map { sorted[$0] }
+                let doomed = indexSet.map { sortedHighlights[$0] }
                 Task { for highlight in doomed { await model.delete(highlight) } }
             }
         }
@@ -106,7 +118,7 @@ struct LibraryView: View {
         exportingAll = true
         defer { exportingAll = false; exportProgress = nil }
 
-        let pending = model.library.sorted.filter { !$0.isExported }
+        let pending = sortedHighlights.filter { !$0.isExported }
         for (index, highlight) in pending.enumerated() {
             exportProgress = (index + 1, pending.count)
             do {
@@ -122,6 +134,12 @@ struct LibraryView: View {
                 return
             }
         }
+    }
+
+    private var sortedHighlights: [Highlight] {
+        model.library.sorted(
+            by: HighlightLibrary.SortOrder(rawValue: sortOrderRaw) ?? .oldestFirst
+        )
     }
 
     private func timecode(_ seconds: Double) -> String {

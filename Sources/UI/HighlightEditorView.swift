@@ -18,6 +18,9 @@ struct HighlightEditorView: View {
     /// needs to add this back, since the player runs on a trimmed composition starting at zero.
     @State private var clipOffset: Double = 0
     @State private var windowDuration: Double = 0
+    /// Held so the full-screen preview can re-composite the crop against the same asset.
+    @State private var composition: AVMutableComposition?
+    @State private var showFullScreen = false
 
     @State private var playhead: Double = 0
     @State private var trimStart: Double = 0
@@ -63,6 +66,30 @@ struct HighlightEditorView: View {
             // looping a 4K composition forever, a periodic time observer firing against it, and
             // the temp files on disk. That alone was enough to keep the phone hot indefinitely.
             .onDisappear { teardown() }
+            .fullScreenCover(isPresented: $showFullScreen) {
+                if let player, let composition {
+                    FullScreenPreview(
+                        player: player,
+                        composition: composition,
+                        quality: model.settings.exportQuality,
+                        trimStart: trimStart,
+                        trimEnd: trimEnd,
+                        cropCenter: $cropCenter,
+                        cropWidth: $cropWidth,
+                        cropPath: highlight.cropPath
+                    )
+                    .onDisappear {
+                        // Framing done full-screen is the real framing; carry it back, and drop
+                        // the crop composition so the inline view returns to the full frame with
+                        // its rectangle overlay.
+                        if highlight.cropPath?.isStatic != false {
+                            highlight.cropPath = .fixed(center: cropCenter, widthFraction: cropWidth)
+                        }
+                        player.currentItem?.videoComposition = nil
+                        seek(trimStart)
+                    }
+                }
+            }
             .alert("Something went wrong", isPresented: .constant(errorMessage != nil)) {
                 Button("OK") { errorMessage = nil }
             } message: { Text(errorMessage ?? "") }
@@ -79,6 +106,7 @@ struct HighlightEditorView: View {
                     // Our own transport sits below; the system controls would fight the crop
                     // rectangle for the same taps.
                     .disabled(true)
+                    .onTapGesture { showFullScreen = true }
             } else {
                 ProgressView()
             }
@@ -163,6 +191,15 @@ struct HighlightEditorView: View {
                 Text(timecode(windowDuration))
                     .font(.footnote.monospacedDigit())
                     .foregroundStyle(.secondary)
+
+                Button {
+                    showFullScreen = true
+                } label: {
+                    Image(systemName: "arrow.up.left.and.arrow.down.right")
+                        .font(.footnote.weight(.semibold))
+                }
+                .buttonStyle(.plain)
+                .disabled(composition == nil)
             }
 
             TrimBar(
@@ -182,7 +219,7 @@ struct HighlightEditorView: View {
                 if playhead > new { seek(trimStart) }
             }
 
-            Text("Drag the yellow handles to trim. The clip loops between them.")
+            Text("Drag the handles to trim. Tap the video for a full-screen look.")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
         }
@@ -278,6 +315,7 @@ struct HighlightEditorView: View {
             self.trimStart = min(highlight.trimStart, max(available - 1, 0))
             self.trimEnd = min(highlight.trimEnd ?? available, available)
 
+            self.composition = composition
             let item = AVPlayerItem(asset: composition)
             item.forwardPlaybackEndTime = CMTime(seconds: trimEnd, preferredTimescale: 600)
             let player = AVPlayer(playerItem: item)

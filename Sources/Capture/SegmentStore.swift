@@ -123,6 +123,9 @@ actor SegmentStore {
             try? FileManager.default.removeItem(at: root.appendingPathComponent(entry))
         }
 
+        // Sweep on launch as well: sessions stranded by an earlier build (or by the app being
+        // killed before it could end its session cleanly) still owe us their unprotected tail.
+        reclaimFinishedSessions()
         persist()
         captureLog.info("restored \(self.sessions.count, privacy: .public) recording session(s)")
     }
@@ -148,13 +151,43 @@ actor SegmentStore {
         persist()
     }
 
-    /// Deletes every inactive session that nothing depends on any more.
+    /// Reclaims everything no highlight depends on any more.
+    ///
+    /// Two levels, and missing the second one is what let storage balloon: a session with no marks
+    /// at all is deleted outright, but a session that *does* contain marks used to keep its entire
+    /// unprotected tail forever. Retention only ever pruned the session being recorded, so every
+    /// stop left behind up to a full retention window — around a gigabyte per stop — that nothing
+    /// would ever look at again.
+    ///
+    /// Once a session has ended, retention is meaningless for it: no new mark can be made against
+    /// footage that is no longer being recorded, so anything unprotected is simply dead.
     private func reclaimFinishedSessions() {
-        for (id, session) in sessions where id != activeSessionID && !session.hasProtectedFootage {
-            try? FileManager.default.removeItem(at: directory(for: id))
-            sessions[id] = nil
-            captureLog.info("reclaimed session \(id.uuidString, privacy: .public)")
+        for (id, session) in sessions where id != activeSessionID {
+            guard session.hasProtectedFootage else {
+                try? FileManager.default.removeItem(at: directory(for: id))
+                sessions[id] = nil
+                captureLog.info("reclaimed session \(id.uuidString, privacy: .public)")
+                continue
+            }
+            discardUnprotected(in: id)
         }
+    }
+
+    /// Drops every unprotected segment in a finished session, regardless of retention.
+    private func discardUnprotected(in id: UUID) {
+        guard var session = sessions[id] else { return }
+        let before = session.segments.count
+        session.segments.removeAll { segment in
+            guard !segment.isProtected else { return false }
+            try? FileManager.default.removeItem(at: url(for: segment, in: id))
+            return true
+        }
+        guard session.segments.count != before else { return }
+        sessions[id] = session
+        captureLog.info("""
+            dropped \(before - session.segments.count, privacy: .public) unprotected segments \
+            from finished session \(id.uuidString, privacy: .public)
+            """)
     }
 
     func setRetention(_ retention: CMTime) {

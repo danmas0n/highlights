@@ -102,4 +102,82 @@ enum ClipComposer {
         if let transform { stitchedVideo.preferredTransform = transform }
         return stitched
     }
+
+    // MARK: - Crop compositing
+
+    /// Builds the crop as a sequence of transform ramps on the composition's layer instruction.
+    ///
+    /// Shared by the exporter and the full-screen preview, so what you inspect before saving is
+    /// produced by exactly the same code that writes the file.
+    ///
+    /// Using ramps rather than a custom `AVVideoCompositing` keeps the whole thing on
+    /// AVFoundation's own hardware-accelerated render path, with no per-frame callback into our
+    /// code, and the same composition can be handed to `AVPlayer` for preview unchanged.
+    /// Synchronous on purpose. The track's `naturalSize` and `preferredTransform` are loaded by
+    /// the caller and passed in, which keeps a non-Sendable `AVCompositionTrack` from crossing an
+    /// isolation boundary — it stays in whatever context already owns the composition.
+    static func makeVideoComposition(
+        track: AVCompositionTrack,
+        naturalSize: CGSize,
+        preferredTransform: CGAffineTransform,
+        cropPath: CropPath,
+        quality: CaptureSettings.ExportQuality,
+        duration: CMTime
+    ) -> AVMutableVideoComposition {
+        let orientedSize = naturalSize.applying(preferredTransform)
+        let sourceSize = CGSize(width: abs(orientedSize.width), height: abs(orientedSize.height))
+        let sourceAspect = sourceSize.width / sourceSize.height
+
+        let renderSize = quality.renderSize(
+            forCropFraction: cropPath.rect(at: 0, sourceAspect: sourceAspect).width,
+            sourceSize: sourceSize
+        )
+
+        let instruction = AVMutableVideoCompositionInstruction()
+        instruction.timeRange = CMTimeRange(start: .zero, duration: duration)
+        let layer = AVMutableVideoCompositionLayerInstruction(assetTrack: track)
+
+        func transform(at time: Double) -> CGAffineTransform {
+            let rect = cropPath.rect(at: time, sourceAspect: sourceAspect)
+            let cropOrigin = CGPoint(x: rect.origin.x * sourceSize.width, y: rect.origin.y * sourceSize.height)
+            let cropWidth = max(rect.width * sourceSize.width, 1)
+            let scale = renderSize.width / cropWidth
+
+            // Orientation first, then scale the crop up to the render size, then slide the crop's
+            // top-left corner to the origin. Order matters: translating before scaling would move
+            // by unscaled pixels.
+            return preferredTransform
+                .concatenating(CGAffineTransform(scaleX: scale, y: scale))
+                .concatenating(CGAffineTransform(translationX: -cropOrigin.x * scale, y: -cropOrigin.y * scale))
+        }
+
+        if cropPath.isStatic {
+            layer.setTransform(transform(at: 0), at: .zero)
+        } else {
+            // Sample densely enough that the piecewise-linear ramps are indistinguishable from
+            // the smoothstep curve, but not so densely that we emit thousands of ramps.
+            let step = 1.0 / 10.0
+            var time = 0.0
+            while time < duration.seconds {
+                let next = min(time + step, duration.seconds)
+                layer.setTransformRamp(
+                    fromStart: transform(at: time),
+                    toEnd: transform(at: next),
+                    timeRange: CMTimeRange(
+                        start: CMTime(seconds: time, preferredTimescale: 600),
+                        duration: CMTime(seconds: next - time, preferredTimescale: 600)
+                    )
+                )
+                time = next
+            }
+        }
+
+        instruction.layerInstructions = [layer]
+
+        let videoComposition = AVMutableVideoComposition()
+        videoComposition.instructions = [instruction]
+        videoComposition.renderSize = renderSize
+        videoComposition.frameDuration = CMTime(value: 1, timescale: 30)
+        return videoComposition
+    }
 }

@@ -111,8 +111,30 @@ final class HighlightLibrary {
         save()
     }
 
-    /// Newest first — during a game the thing you just marked is the thing you want to see.
-    var sorted: [Highlight] { highlights.sorted { $0.triggerSeconds > $1.triggerSeconds } }
+    enum SortOrder: String, CaseIterable {
+        case newestFirst
+        case oldestFirst
+
+        var label: String {
+            switch self {
+            case .newestFirst: "Newest first"
+            case .oldestFirst: "In game order"
+            }
+        }
+    }
+
+    /// Ordered by wall-clock time, never by position within a recording.
+    ///
+    /// `triggerSeconds` restarts at zero for each recording session, so sorting by it interleaves
+    /// the second half with the first — and because the row label is derived from that number, the
+    /// result looks like it's sorting by name. `markedAt` is the only ordering that means anything
+    /// across a whole game.
+    func sorted(by order: SortOrder) -> [Highlight] {
+        switch order {
+        case .newestFirst: highlights.sorted { $0.markedAt > $1.markedAt }
+        case .oldestFirst: highlights.sorted { $0.markedAt < $1.markedAt }
+        }
+    }
 
     private func load() {
         guard let data = try? Data(contentsOf: url),

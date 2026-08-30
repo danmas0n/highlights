@@ -39,6 +39,46 @@ actor HighlightExtractor {
         init(_ value: T) { self.value = value }
     }
 
+    /// Captures why AVFoundation considers a video composition invalid.
+    private final class VideoCompositionValidator: NSObject, AVVideoCompositionValidationHandling {
+        private(set) var problems: [String] = []
+        var summary: String { problems.isEmpty ? "no detail reported" : problems.joined(separator: "; ") }
+
+        func videoComposition(
+            _ videoComposition: AVVideoComposition,
+            shouldContinueValidatingAfterFindingInvalidValueForKey key: String
+        ) -> Bool {
+            problems.append("invalid value for \(key)")
+            return true
+        }
+
+        func videoComposition(
+            _ videoComposition: AVVideoComposition,
+            shouldContinueValidatingAfterFindingEmptyTimeRange timeRange: CMTimeRange
+        ) -> Bool {
+            problems.append("empty time range at \(timeRange.start.seconds)s")
+            return true
+        }
+
+        func videoComposition(
+            _ videoComposition: AVVideoComposition,
+            shouldContinueValidatingAfterFindingInvalidTimeRangeIn videoCompositionInstruction: any AVVideoCompositionInstructionProtocol
+        ) -> Bool {
+            problems.append("invalid instruction time range")
+            return true
+        }
+
+        func videoComposition(
+            _ videoComposition: AVVideoComposition,
+            shouldContinueValidatingAfterFindingInvalidTrackIDIn videoCompositionInstruction: any AVVideoCompositionInstructionProtocol,
+            layerInstruction: AVVideoCompositionLayerInstruction,
+            asset: AVAsset
+        ) -> Bool {
+            problems.append("layer instruction references a track not in the asset")
+            return true
+        }
+    }
+
     private let store: SegmentStore
 
     init(store: SegmentStore) {
@@ -78,29 +118,74 @@ actor HighlightExtractor {
         }
 
         let cropPath = highlight.cropPath ?? .fixed(widthFraction: 1.0)
-        let videoComposition = try await makeVideoComposition(
-            track: videoTrack,
-            cropPath: cropPath,
-            quality: quality,
-            duration: composition.duration
-        )
+
+        // Only build a video composition when the crop actually does something. An uncropped
+        // export is the common case — you framed it wide and it was fine — and compositing it
+        // means re-rendering every 4K frame to produce a pixel-identical result. Skipping it is
+        // faster, cooler, and removes an entire class of "invalid video composition" failure
+        // from the path most exports take.
+        let videoComposition: AVMutableVideoComposition?
+        if cropPath.isFullFrame {
+            videoComposition = nil
+        } else {
+            videoComposition = ClipComposer.makeVideoComposition(
+                track: videoTrack,
+                naturalSize: try await videoTrack.load(.naturalSize),
+                preferredTransform: try await videoTrack.load(.preferredTransform),
+                cropPath: cropPath,
+                quality: quality,
+                duration: composition.duration
+            )
+        }
 
         let outputURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("highlight-\(highlight.id.uuidString).mov")
         try? FileManager.default.removeItem(at: outputURL)
 
-        // `HEVCHighestQuality` caps at 1080p on some presets; the passthrough-ish
-        // `HEVC3840x2160` and friends force a ceiling we don't want either. `AVAssetExportPreset`
-        // choice matters less than the video composition's render size, which we set explicitly.
-        guard let session = AVAssetExportSession(
-            asset: composition, presetName: AVAssetExportPresetHEVCHighestQuality
-        ) else {
+        // Without a composition to set the size, the preset has to do the downscaling itself.
+        let presetName: String
+        if videoComposition == nil, quality == .fullHD {
+            presetName = AVAssetExportPreset1920x1080
+        } else {
+            presetName = AVAssetExportPresetHEVCHighestQuality
+        }
+
+        // The initialiser returns nil for a preset this asset can't use, which is a cheaper and
+        // less deprecated compatibility check than asking for the whole list.
+        var resolvedPreset = presetName
+        var made = AVAssetExportSession(asset: composition, presetName: presetName)
+        if made == nil {
+            captureLog.error("preset \(presetName, privacy: .public) unavailable; falling back")
+            resolvedPreset = AVAssetExportPresetHighestQuality
+            made = AVAssetExportSession(asset: composition, presetName: resolvedPreset)
+        }
+        guard let session = made else {
             throw ExtractError.exportFailed("Couldn't create an export session.")
         }
         session.outputURL = outputURL
         session.outputFileType = .mov
         session.videoComposition = videoComposition
         session.shouldOptimizeForNetworkUse = true
+
+        // Ask AVFoundation to check the composition before it refuses to export it. Its own
+        // failure surfaces as the useless string "Operation Stopped"; the validation delegate
+        // names the offending instruction instead.
+        if let videoComposition {
+            let validator = VideoCompositionValidator()
+            let valid = (try? await videoComposition.isValid(
+                for: composition,
+                timeRange: CMTimeRange(start: .zero, duration: composition.duration),
+                validationDelegate: validator
+            )) ?? false
+            if !valid {
+                captureLog.error("""
+                    invalid video composition: \(validator.summary, privacy: .public) \
+                    renderSize=\(Int(videoComposition.renderSize.width), privacy: .public)×\
+                    \(Int(videoComposition.renderSize.height), privacy: .public) \
+                    duration=\(composition.duration.seconds, privacy: .public)s
+                    """)
+            }
+        }
 
         // `AVAssetExportSession` isn't Sendable, but reading `.progress` while the export runs is
         // exactly what the property is for. Box it rather than making the whole method
@@ -119,13 +204,29 @@ actor HighlightExtractor {
         await session.export()
 
         guard session.status == .completed else {
-            throw ExtractError.exportFailed(session.error?.localizedDescription ?? "unknown error")
+            // "Operation Stopped" is AVFoundation's catch-all description for several distinct
+            // failures, so log the domain and code — that's what actually identifies the cause.
+            let error = session.error as NSError?
+            captureLog.error("""
+                export failed: \(error?.domain ?? "?", privacy: .public) \
+                code=\(error?.code ?? 0, privacy: .public) \
+                "\(error?.localizedDescription ?? "unknown", privacy: .public)" \
+                underlying=\(String(describing: error?.userInfo[NSUnderlyingErrorKey]), privacy: .public) \
+                preset=\(resolvedPreset, privacy: .public) \
+                composited=\(videoComposition != nil, privacy: .public)
+                """)
+            throw ExtractError.exportFailed(
+                session.error?.localizedDescription ?? "unknown error"
+            )
         }
         progress?(1.0)
+        // Bound separately: `??` takes an autoclosure, which can't contain an `await`.
+        let naturalSize = (try? await videoTrack.load(.naturalSize)) ?? .zero
+        let renderSize = videoComposition?.renderSize ?? naturalSize
         captureLog.info("""
             exported \(composition.duration.seconds, privacy: .public)s at \
-            \(Int(videoComposition.renderSize.width), privacy: .public)×\
-            \(Int(videoComposition.renderSize.height), privacy: .public)
+            \(Int(renderSize.width), privacy: .public)×\(Int(renderSize.height), privacy: .public) \
+            preset=\(resolvedPreset, privacy: .public)
             """)
 
         var identifier: String?
@@ -135,81 +236,8 @@ actor HighlightExtractor {
         return Output(
             fileURL: outputURL,
             assetIdentifier: identifier,
-            renderSize: videoComposition.renderSize
+            renderSize: renderSize
         )
-    }
-
-    // MARK: - Video composition
-
-    /// Builds the crop as a sequence of transform ramps on the composition's layer instruction.
-    ///
-    /// Using ramps rather than a custom `AVVideoCompositing` keeps the whole thing on
-    /// AVFoundation's own hardware-accelerated render path, with no per-frame callback into our
-    /// code, and the same composition can be handed to `AVPlayer` for preview unchanged.
-    private func makeVideoComposition(
-        track: AVCompositionTrack,
-        cropPath: CropPath,
-        quality: CaptureSettings.ExportQuality,
-        duration: CMTime
-    ) async throws -> AVMutableVideoComposition {
-        let naturalSize = try await track.load(.naturalSize)
-        let preferredTransform = try await track.load(.preferredTransform)
-
-        let orientedSize = naturalSize.applying(preferredTransform)
-        let sourceSize = CGSize(width: abs(orientedSize.width), height: abs(orientedSize.height))
-        let sourceAspect = sourceSize.width / sourceSize.height
-
-        let renderSize = quality.renderSize(
-            forCropFraction: cropPath.rect(at: 0, sourceAspect: sourceAspect).width,
-            sourceSize: sourceSize
-        )
-
-        let instruction = AVMutableVideoCompositionInstruction()
-        instruction.timeRange = CMTimeRange(start: .zero, duration: duration)
-        let layer = AVMutableVideoCompositionLayerInstruction(assetTrack: track)
-
-        func transform(at time: Double) -> CGAffineTransform {
-            let rect = cropPath.rect(at: time, sourceAspect: sourceAspect)
-            let cropOrigin = CGPoint(x: rect.origin.x * sourceSize.width, y: rect.origin.y * sourceSize.height)
-            let cropWidth = max(rect.width * sourceSize.width, 1)
-            let scale = renderSize.width / cropWidth
-
-            // Orientation first, then scale the crop up to the render size, then slide the crop's
-            // top-left corner to the origin. Order matters: translating before scaling would move
-            // by unscaled pixels.
-            return preferredTransform
-                .concatenating(CGAffineTransform(scaleX: scale, y: scale))
-                .concatenating(CGAffineTransform(translationX: -cropOrigin.x * scale, y: -cropOrigin.y * scale))
-        }
-
-        if cropPath.isStatic {
-            layer.setTransform(transform(at: 0), at: .zero)
-        } else {
-            // Sample densely enough that the piecewise-linear ramps are indistinguishable from
-            // the smoothstep curve, but not so densely that we emit thousands of ramps.
-            let step = 1.0 / 10.0
-            var time = 0.0
-            while time < duration.seconds {
-                let next = min(time + step, duration.seconds)
-                layer.setTransformRamp(
-                    fromStart: transform(at: time),
-                    toEnd: transform(at: next),
-                    timeRange: CMTimeRange(
-                        start: CMTime(seconds: time, preferredTimescale: 600),
-                        duration: CMTime(seconds: next - time, preferredTimescale: 600)
-                    )
-                )
-                time = next
-            }
-        }
-
-        instruction.layerInstructions = [layer]
-
-        let videoComposition = AVMutableVideoComposition()
-        videoComposition.instructions = [instruction]
-        videoComposition.renderSize = renderSize
-        videoComposition.frameDuration = CMTime(value: 1, timescale: 30)
-        return videoComposition
     }
 
     // MARK: - Photos
