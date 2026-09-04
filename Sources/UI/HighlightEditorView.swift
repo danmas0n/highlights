@@ -37,6 +37,7 @@ struct HighlightEditorView: View {
     @State private var exportProgress: Float = 0
     @State private var status: String?
     @State private var errorMessage: String?
+    @State private var confirmingDelete = false
 
     init(highlight: Highlight) {
         _highlight = State(initialValue: highlight)
@@ -97,6 +98,20 @@ struct HighlightEditorView: View {
             .alert("Something went wrong", isPresented: .constant(errorMessage != nil)) {
                 Button("OK") { errorMessage = nil }
             } message: { Text(errorMessage ?? "") }
+            .confirmationDialog("Delete this clip?", isPresented: $confirmingDelete, titleVisibility: .visible) {
+                Button("Delete clip", role: .destructive) {
+                    let doomed = highlight
+                    // Tear down the player first: deleting frees the segments it's reading from.
+                    teardown()
+                    dismiss()
+                    Task { await model.delete(doomed) }
+                }
+                Button("Keep", role: .cancel) {}
+            } message: {
+                Text(highlight.isExported
+                     ? "The copy in Photos will be kept."
+                     : "This clip hasn't been saved to Photos yet.")
+            }
         }
     }
 
@@ -282,6 +297,18 @@ struct HighlightEditorView: View {
                         .foregroundStyle(.green)
                         .font(.footnote)
                 }
+            }
+
+            Section {
+                Button(role: .destructive) {
+                    confirmingDelete = true
+                } label: {
+                    Label("Delete clip", systemImage: "trash")
+                }
+            } footer: {
+                Text(highlight.isExported
+                     ? "Frees this clip's footage. The version already saved to Photos is untouched."
+                     : "Frees this clip's footage. It hasn't been saved to Photos, so this is permanent.")
             }
 
             if let status {

@@ -6,7 +6,7 @@ struct LibraryView: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var editing: Highlight?
-    @AppStorage("clips.sortOrder") private var sortOrderRaw = HighlightLibrary.SortOrder.oldestFirst.rawValue
+    @AppStorage("clips.sortOrder") private var sortOrderRaw = HighlightLibrary.SortOrder.newestFirst.rawValue
     @State private var exportingAll = false
     @State private var exportProgress: (done: Int, total: Int)?
     @State private var errorMessage: String?
@@ -138,7 +138,7 @@ struct LibraryView: View {
 
     private var sortedHighlights: [Highlight] {
         model.library.sorted(
-            by: HighlightLibrary.SortOrder(rawValue: sortOrderRaw) ?? .oldestFirst
+            by: HighlightLibrary.SortOrder(rawValue: sortOrderRaw) ?? .newestFirst
         )
     }
 

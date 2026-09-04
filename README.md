@@ -39,9 +39,13 @@ The app opens in **standby** — camera live so you can frame the shot, nothing 
 
 Things that are true regardless of the software:
 
-- **Use the wide (1×) lens, not the telephoto.** Counterintuitive, but the tele has a smaller,
-  worse sensor, and shooting tele throws away the crop latitude the whole approach depends on.
-  The app always uses the wide camera for this reason.
+- **Pick a zoom that matches how far away you are.** The app started out pinned to the wide lens,
+  on the theory that a lossless 2× crop out of 4K was reach enough. From a real sideline it isn't:
+  cropping can only subdivide detail the sensor already resolved, and from forty yards there isn't
+  enough of it to subdivide. The zoom control on the capture screen offers whatever your phone can
+  do optically. More reach costs crop latitude and makes panning less forgiving, so use the least
+  that gets your player big enough — and check the lens name under the timer, which says whether
+  you're getting real optical zoom or a digital crop.
 - **A fluid-head tripod (~$40) beats any software.** A fluid pan head versus a friction ball head
   is the single biggest improvement to smooth panning.
 - **Higher and further back is better.** It reduces the angular speed you have to track.

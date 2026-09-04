@@ -110,8 +110,8 @@ struct CaptureView: View {
                         .font(.system(.title3, design: .monospaced).weight(.semibold))
                 }
                 Text(isRecording
-                     ? "\(Int(model.engine.availableHistory.seconds))s of history"
-                     : "Standby")
+                     ? "\(Int(model.engine.availableHistory.seconds))s of history · \(model.engine.activeLens)"
+                     : "Standby · \(model.engine.activeLens)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -167,6 +167,10 @@ struct CaptureView: View {
 
             Spacer()
 
+            zoomControl
+
+            Spacer()
+
             recordButton
 
             Spacer()
@@ -189,6 +193,31 @@ struct CaptureView: View {
         }
         .padding(.horizontal, 14).padding(.vertical, 10)
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
+    }
+
+    /// Optical zoom, on the capture screen rather than buried in Settings.
+    ///
+    /// How far away you are is something you discover on arriving at the pitch, not something you
+    /// configure at home — and it changes between a full-size field and a small-sided one. Safe to
+    /// change mid-recording: zoom doesn't alter the recorded dimensions.
+    private var zoomControl: some View {
+        HStack(spacing: 6) {
+            ForEach(model.engine.zoomStops, id: \.self) { stop in
+                let selected = abs(model.settings.zoomFactor - stop) < 0.01
+                Button {
+                    model.engine.setZoom(stop)
+                    model.settings.zoomFactor = stop
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                } label: {
+                    Text(stop < 1 ? String(format: "%.1f×", stop) : String(format: "%g×", stop))
+                        .font(.footnote.weight(.semibold).monospacedDigit())
+                        .foregroundStyle(selected ? .black : .white)
+                        .padding(.horizontal, 10).padding(.vertical, 7)
+                        .background(selected ? Color.yellow : Color.white.opacity(0.14), in: Capsule())
+                }
+                .buttonStyle(.plain)
+            }
+        }
     }
 
     /// Halftime, warm-ups, and the drive home all want the camera off. Recording only when you

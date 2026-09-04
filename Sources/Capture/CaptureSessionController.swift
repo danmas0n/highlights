@@ -35,6 +35,18 @@ final class CaptureSessionController: @unchecked Sendable {
     /// own connection can be kept in step.
     var onRotationChange: (@Sendable (CGFloat) -> Void)?
 
+    /// Reports the zoom stops this device can reach optically, in Camera-app terms.
+    var onLensesResolved: (@Sendable ([Double]) -> Void)?
+    /// Reports which physical lens is live, so the UI can distinguish real zoom from digital.
+    var onActiveLensChanged: (@Sendable (String) -> Void)?
+
+    /// Device zoom factor corresponding to a display zoom of 1.0 (the main camera).
+    ///
+    /// A virtual multi-camera device numbers its zoom from its *widest* constituent, so on a phone
+    /// with an ultra-wide, `videoZoomFactor == 1` is 0.5x in the language everyone actually uses.
+    private var mainCameraZoomBase: Double = 1
+    private var lensObservation: NSKeyValueObservation?
+
     // MARK: - Start / stop
 
     func configureAndStart(settings: CaptureSettings) async throws {
@@ -177,6 +189,7 @@ final class CaptureSessionController: @unchecked Sendable {
 
     deinit {
         rotationObservation?.invalidate()
+        lensObservation?.invalidate()
     }
 
     // MARK: - Configuration
@@ -206,13 +219,16 @@ final class CaptureSessionController: @unchecked Sendable {
         // 4K format, and a preset would otherwise stomp it.
         session.sessionPreset = .inputPriority
 
-        // Deliberately the wide main camera, never the telephoto. The entire framing strategy is
-        // "shoot wide, crop tight afterwards"; shooting through the tele would trade a better
-        // sensor and all of our crop latitude for zoom we can synthesize losslessly later.
-        guard let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back) else {
-            throw CaptureError.noCamera
-        }
+        // A virtual device spanning every rear lens, so requesting a zoom factor lets iOS serve it
+        // from whichever physical camera can do so optically — and switch between them without us
+        // reconfiguring the session mid-game.
+        //
+        // This used to be pinned to the wide camera on the theory that cropping 4K was reach
+        // enough. From a real sideline it isn't: cropping can only subdivide detail the sensor
+        // already resolved, and from forty yards there isn't enough of it to subdivide.
+        guard let device = Self.preferredCamera() else { throw CaptureError.noCamera }
         videoDevice = device
+        captureReport("camera: \(device.localizedName)")
 
         let videoInput = try AVCaptureDeviceInput(device: device)
         guard session.canAddInput(videoInput) else { throw CaptureError.cannotAddInput }
@@ -222,21 +238,117 @@ final class CaptureSessionController: @unchecked Sendable {
         // outputs, so standby neither draws mic power nor lights the privacy indicator.
 
         try configureFormat(on: device, settings: settings)
+        resolveLenses(on: device)
+        applyZoom(settings.zoomFactor, on: device)
         startTrackingRotation(device: device)
+        startTrackingActiveLens(on: device)
+    }
+
+    /// Widest-spanning rear camera available, so the zoom range covers as many lenses as possible.
+    private static func preferredCamera() -> AVCaptureDevice? {
+        AVCaptureDevice.DiscoverySession(
+            deviceTypes: [
+                .builtInTripleCamera,
+                .builtInDualWideCamera,
+                .builtInDualCamera,
+                .builtInWideAngleCamera,
+            ],
+            mediaType: .video,
+            position: .back
+        ).devices.first
+    }
+
+    // MARK: - Zoom
+
+    /// Works out where the main camera sits in the virtual device's zoom numbering, and which
+    /// display zoom factors correspond to a genuine lens change.
+    private func resolveLenses(on device: AVCaptureDevice) {
+        let constituents = device.constituentDevices
+        let switchOvers = device.virtualDeviceSwitchOverVideoZoomFactors.map(\.doubleValue)
+
+        guard !constituents.isEmpty, switchOvers.count >= constituents.count - 1 else {
+            // A single-lens device already numbers its zoom from the main camera.
+            mainCameraZoomBase = 1
+            onLensesResolved?([1])
+            return
+        }
+
+        // Constituent i covers zoom upward from base(i), where base(0) is 1 and every later base
+        // is the switch-over factor immediately before it.
+        func base(_ index: Int) -> Double { index == 0 ? 1 : switchOvers[index - 1] }
+        let mainIndex = constituents.firstIndex { $0.deviceType == .builtInWideAngleCamera } ?? 0
+        mainCameraZoomBase = base(mainIndex)
+
+        let stops = constituents.indices.map { base($0) / mainCameraZoomBase }
+        captureReport("lenses: stops=\(stops.map { String(format: "%.1f", $0) }.joined(separator: "/")) base=\(mainCameraZoomBase)")
+        onLensesResolved?(stops)
+    }
+
+    /// `displayFactor` is in Camera-app terms: 1.0 is the main lens, 5.0 the telephoto.
+    func setZoom(_ displayFactor: Double) {
+        queue.async { [self] in
+            guard let device = videoDevice else { return }
+            applyZoom(displayFactor, on: device)
+        }
+    }
+
+    private func applyZoom(_ displayFactor: Double, on device: AVCaptureDevice) {
+        guard (try? device.lockForConfiguration()) != nil else { return }
+        defer { device.unlockForConfiguration() }
+        let requested = displayFactor * mainCameraZoomBase
+        let applied = min(
+            max(requested, device.minAvailableVideoZoomFactor),
+            device.maxAvailableVideoZoomFactor
+        )
+        device.videoZoomFactor = applied
+        if abs(applied - requested) > 0.01 {
+            captureReport("zoom: requested \(requested) clamped to \(applied)")
+        }
+    }
+
+    /// Watches which physical lens is actually serving the current zoom.
+    ///
+    /// Worth surfacing: if the active format can't drive the telephoto, iOS quietly digitally
+    /// zooms the wide instead. That looks like zoom and isn't — and you want to know which one
+    /// you're getting *before* filming a game with it.
+    private func startTrackingActiveLens(on device: AVCaptureDevice) {
+        lensObservation?.invalidate()
+        report(activeLens: device)
+        lensObservation = device.observe(\.activePrimaryConstituent, options: [.new]) { [weak self] device, _ in
+            self?.report(activeLens: device)
+        }
+    }
+
+    private func report(activeLens device: AVCaptureDevice) {
+        let name: String
+        switch device.activePrimaryConstituent?.deviceType ?? device.deviceType {
+        case .builtInUltraWideCamera: name = "ultra-wide"
+        case .builtInTelephotoCamera: name = "telephoto"
+        default: name = "wide"
+        }
+        captureReport("active lens: \(name), device zoom \(String(format: "%.1f", device.videoZoomFactor))")
+        onActiveLensChanged?(name)
     }
 
     /// Selects the format matching the requested resolution and frame rate, so we get the 4K
     /// source the crop-later workflow depends on.
     private func configureFormat(on device: AVCaptureDevice, settings: CaptureSettings) throws {
         let target = settings.resolution
-        let match = device.formats.first { format in
+        let candidates = device.formats.filter { format in
             let dims = CMVideoFormatDescriptionGetDimensions(format.formatDescription)
             guard dims.width == target.width, dims.height == target.height else { return false }
             return format.videoSupportedFrameRateRanges.contains {
                 $0.minFrameRate <= Double(settings.frameRate) && Double(settings.frameRate) <= $0.maxFrameRate
             }
         }
-        guard let format = match else { throw CaptureError.unsupportedFormat }
+        // Among equally-sized formats, take the one that can zoom furthest. On a virtual device the
+        // telephoto is reached by crossing a zoom switch-over point, so a format whose maximum zoom
+        // falls short of that point can never engage the tele — it would quietly digitally zoom the
+        // wide instead, which looks like zoom and isn't.
+        guard let format = candidates.max(by: { $0.videoMaxZoomFactor < $1.videoMaxZoomFactor }) else {
+            throw CaptureError.unsupportedFormat
+        }
+        captureReport("format: \(target.label)@\(settings.frameRate), max zoom \(format.videoMaxZoomFactor)")
 
         try device.lockForConfiguration()
         defer { device.unlockForConfiguration() }

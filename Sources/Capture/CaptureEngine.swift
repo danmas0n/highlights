@@ -57,6 +57,10 @@ final class CaptureEngine {
     private(set) var needsPermissionInSettings = false
     /// Set when heat forced a quality reduction mid-recording, so the UI can say so.
     private(set) var thermalDowngradeNote: String?
+    /// Zoom stops this phone can reach optically, in Camera-app terms (1.0 is the main lens).
+    private(set) var zoomStops: [Double] = [1]
+    /// Which physical lens is live — "wide", "telephoto", "ultra-wide".
+    private(set) var activeLens: String = "wide"
 
     let store: SegmentStore
     var settings: CaptureSettings
@@ -95,6 +99,12 @@ final class CaptureEngine {
         )
         outputProxy.setRecorder(recorder)
         recorder.delegate = self
+        sessionController.onLensesResolved = { [weak self] stops in
+            Task { @MainActor in self?.zoomStops = stops }
+        }
+        sessionController.onActiveLensChanged = { [weak self] lens in
+            Task { @MainActor in self?.activeLens = lens }
+        }
         registerForSystemNotifications()
         Task { await store.restore() }
     }
@@ -213,6 +223,13 @@ final class CaptureEngine {
 
     /// `point` is in the camera's normalized coordinate space.
     func focus(at point: CGPoint) { sessionController.focus(at: point) }
+
+    /// Changes optical zoom live — safe mid-recording, since it doesn't alter the recorded
+    /// dimensions and so can't disturb the writer.
+    func setZoom(_ factor: Double) {
+        settings.zoomFactor = factor
+        sessionController.setZoom(factor)
+    }
 
     // MARK: - Disk
 

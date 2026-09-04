@@ -58,6 +58,16 @@ struct CaptureSettings: Codable, Equatable {
 
     var showSafeFrame: Bool = true
 
+    /// Optical zoom, expressed the way the Camera app does — relative to the main camera, so 1.0
+    /// is the wide lens and 5.0 is the telephoto.
+    ///
+    /// The original design said "always shoot wide, crop later", on the theory that a 2x lossless
+    /// crop out of 4K was reach enough. From an actual sideline it isn't: at a youth pitch you can
+    /// easily be 40 yards from play, and 2x leaves a player too small to enjoy. Real optical zoom
+    /// costs crop latitude and makes panning less forgiving, but no amount of cropping invents
+    /// detail the sensor never resolved.
+    var zoomFactor: Double = 1.0
+
     /// Export resolution is mostly a consequence of how far you zoomed, not an independent dial.
     ///
     /// The crop window is taken from a 4K frame at its native pixels, so an uncropped clip *is*
