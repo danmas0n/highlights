@@ -279,7 +279,18 @@ final class CaptureSessionController: @unchecked Sendable {
         let mainIndex = constituents.firstIndex { $0.deviceType == .builtInWideAngleCamera } ?? 0
         mainCameraZoomBase = base(mainIndex)
 
-        let stops = constituents.indices.map { base($0) / mainCameraZoomBase }
+        var stops = constituents.indices.map { base($0) / mainCameraZoomBase }
+        // 2x is worth offering even though no lens sits there: on a 48MP main sensor it's a
+        // centre crop read at full resolution rather than a binned downscale, and it's the stop
+        // most likely to be the sweet spot — enough reach to see a player, wide enough that
+        // panning a tripod by hand stays forgiving.
+        if !stops.contains(where: { abs($0 - 2) < 0.01 }) {
+            let deviceZoomForTwo = 2 * mainCameraZoomBase
+            if deviceZoomForTwo <= device.maxAvailableVideoZoomFactor {
+                stops.append(2)
+            }
+        }
+        stops.sort()
         captureReport("lenses: stops=\(stops.map { String(format: "%.1f", $0) }.joined(separator: "/")) base=\(mainCameraZoomBase)")
         onLensesResolved?(stops)
     }

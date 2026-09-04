@@ -50,9 +50,11 @@ struct CaptureView: View {
 
             Color.white.opacity(flashOpacity).ignoresSafeArea().allowsHitTesting(false)
 
-            VStack {
+            VStack(spacing: 10) {
                 topBar
                 Spacer()
+                hintText
+                zoomControl
                 bottomBar
             }
             .padding(.horizontal, 24)
@@ -160,6 +162,20 @@ struct CaptureView: View {
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
     }
 
+    private var hintText: some View {
+        Text(isRecording
+             ? "Tap anywhere to mark the last \(Int(model.settings.preRollSeconds))s"
+             : "Press record to start")
+            .font(.footnote.weight(.medium))
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+            .minimumScaleFactor(0.7)
+            .padding(.horizontal, 12).padding(.vertical, 6)
+            .background(.ultraThinMaterial, in: Capsule())
+    }
+
+    /// Four controls, evenly spaced. Everything else got its own row — this used to hold the zoom
+    /// pills and a hint line too, which in portrait squeezed them to nothing.
     private var bottomBar: some View {
         HStack(spacing: 12) {
             chromeButton("photo.stack", "Clips") { showLibrary = true }
@@ -167,22 +183,9 @@ struct CaptureView: View {
 
             Spacer()
 
-            zoomControl
-
-            Spacer()
-
             recordButton
 
             Spacer()
-
-            Text(isRecording
-                 ? "Tap to mark the last \(Int(model.settings.preRollSeconds))s"
-                 : "Press record to start")
-                .font(.footnote.weight(.medium))
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .minimumScaleFactor(0.6)
-                .frame(maxWidth: 160)
 
             // Screen brightness is a meaningful share of the power draw over two 40-minute
             // halves, and there is nothing to look at between highlights anyway.
@@ -200,23 +203,28 @@ struct CaptureView: View {
     /// How far away you are is something you discover on arriving at the pitch, not something you
     /// configure at home — and it changes between a full-size field and a small-sided one. Safe to
     /// change mid-recording: zoom doesn't alter the recorded dimensions.
+    @ViewBuilder
     private var zoomControl: some View {
-        HStack(spacing: 6) {
-            ForEach(model.engine.zoomStops, id: \.self) { stop in
-                let selected = abs(model.settings.zoomFactor - stop) < 0.01
-                Button {
-                    model.engine.setZoom(stop)
-                    model.settings.zoomFactor = stop
-                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                } label: {
-                    Text(stop < 1 ? String(format: "%.1f×", stop) : String(format: "%g×", stop))
-                        .font(.footnote.weight(.semibold).monospacedDigit())
-                        .foregroundStyle(selected ? .black : .white)
-                        .padding(.horizontal, 10).padding(.vertical, 7)
-                        .background(selected ? Color.yellow : Color.white.opacity(0.14), in: Capsule())
+        if model.engine.zoomStops.count > 1 {
+            HStack(spacing: 8) {
+                ForEach(model.engine.zoomStops, id: \.self) { stop in
+                    let selected = abs(model.settings.zoomFactor - stop) < 0.01
+                    Button {
+                        model.engine.setZoom(stop)
+                        model.settings.zoomFactor = stop
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    } label: {
+                        Text(stop < 1 ? String(format: "%.1f×", stop) : String(format: "%g×", stop))
+                            .font(.subheadline.weight(.bold).monospacedDigit())
+                            .foregroundStyle(selected ? .black : .white)
+                            .frame(minWidth: 46, minHeight: 38)
+                            .background(selected ? Color.yellow : Color.white.opacity(0.16), in: Capsule())
+                    }
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
             }
+            .padding(6)
+            .background(.ultraThinMaterial, in: Capsule())
         }
     }
 
