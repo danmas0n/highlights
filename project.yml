@@ -22,6 +22,7 @@ targets:
     sources:
       - path: Sources
       - path: Resources/Assets.xcassets
+      - path: Resources/PrivacyInfo.xcprivacy
     info:
       path: Resources/Info.plist
       properties:
@@ -30,6 +31,9 @@ targets:
         CFBundleVersion: "1"
         UILaunchScreen: {}
         UIRequiresFullScreen: true
+        # Declared up front so every submission isn't stopped to ask. The app uses no encryption
+        # beyond what iOS itself provides, which is exempt.
+        ITSAppUsesNonExemptEncryption: false
         UIStatusBarHidden: true
         NSCameraUsageDescription: >-
           Highlights uses the camera to record the game so you can save the

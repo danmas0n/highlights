@@ -20,6 +20,8 @@
 	<string>1.0</string>
 	<key>CFBundleVersion</key>
 	<string>1</string>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<key>NSCameraUsageDescription</key>
 	<string>Highlights uses the camera to record the game so you can save the moments you mark. Nothing leaves your phone.</string>
 	<key>NSMicrophoneUsageDescription</key>
