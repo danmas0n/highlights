@@ -63,6 +63,11 @@ struct AboutView: View {
                 tipJar
 
                 Section {
+                    // A plain mailto: opens whatever mail app the person actually uses, with the
+                    // subject filled in so the messages are easy to find later.
+                    Link(destination: URL(string: "mailto:d@jpsj.me?subject=Highlights%20feedback")!) {
+                        Label("Send feedback", systemImage: "envelope")
+                    }
                     Link(destination: URL(string: "https://jpsj.me")!) {
                         Label("Website", systemImage: "globe")
                     }
