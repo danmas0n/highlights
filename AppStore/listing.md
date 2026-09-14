@@ -40,7 +40,7 @@ EDIT ON THE SPOT
 • Trim with drag handles, like Photos
 • Frame the crop, or let auto-follow track your player
 • Full-screen review to see whether it was actually any good
-• Save to your camera roll and send it to the grandparents
+• Save to your camera roll and send it to the grandparents (or a college coach)
 
 BUILT FOR A REAL SIDELINE
 • Halftime? Stop and restart. Every clip stays intact

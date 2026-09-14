@@ -88,6 +88,11 @@ actor SegmentStore {
     private func initURL(for id: UUID) -> URL {
         directory(for: id).appendingPathComponent("init.mp4")
     }
+    /// One continuous audio file per session, alongside the video segments. Never pruned — at
+    /// 64 kbps a whole game is a few tens of megabytes — and removed with the session.
+    func audioURL(for id: UUID) -> URL {
+        directory(for: id).appendingPathComponent("audio.mp4")
+    }
     private func url(for segment: Segment, in id: UUID) -> URL {
         directory(for: id).appendingPathComponent(segment.filename)
     }
@@ -318,6 +323,9 @@ actor SegmentStore {
         let parts: [URL]
         /// Session-timeline position of the first frame of `parts[0]`.
         let startSeconds: Double
+        /// The session's continuous audio file, whose timeline origin coincides with the video's.
+        /// Nil for sessions recorded before audio was split out, or if it failed to write.
+        let audioURL: URL?
     }
 
     /// Returns the stored segments covering a range, in order.
@@ -339,9 +347,11 @@ actor SegmentStore {
             first at \(first.startSeconds, privacy: .public)s
             """)
 
+        let audio = audioURL(for: id)
         return ReassembledClip(
             parts: covering.map { url(for: $0, in: id) },
-            startSeconds: first.startSeconds
+            startSeconds: first.startSeconds,
+            audioURL: FileManager.default.fileExists(atPath: audio.path) ? audio : nil
         )
     }
 

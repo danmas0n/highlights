@@ -51,7 +51,7 @@ struct OnboardingView: View {
             body: """
             Open Clips, pick a moment, drag the handles to trim and the yellow box to frame. Tap \
             the video to see it full-screen. Save to Photos and it's in your camera roll, ready to \
-            send to grandparents.
+            send to grandparents (or college coaches…).
             """
         ),
     ]

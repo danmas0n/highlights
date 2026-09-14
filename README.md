@@ -119,6 +119,15 @@ alternative — rotating a fresh writer every few seconds — drops frames at ev
 overlapping two writers to hide the gap means two concurrent 4K encodes on a phone that is already
 thermally marginal.
 
+### Audio is a separate file
+
+Video goes through the segmenting writer; audio does not. Muxing audio into HLS-segmented output
+failed two ways at once — the writer stalled audio while interleaving it against video (a third
+of buffers were refused), and what it did write came back unreadable from a single-fragment file.
+Audio at 64 kbps is about half a megabyte a minute, so it needs neither segmenting nor pruning:
+each session records one continuous fragmented `audio.mp4` anchored on the same first video frame,
+and `ClipComposer` lays the matching time range under the stitched video at export.
+
 ### Segments are self-contained
 
 Each stored segment has the initialization header prepended **when it's written**. The header is

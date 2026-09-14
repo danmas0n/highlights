@@ -28,6 +28,7 @@ enum ClipComposer {
         let stitched = try await stitch(parts: clip.parts)
         let transform = stitched.tracks(withMediaType: .video).first?.preferredTransform
         let stitchedDuration = stitched.duration
+        try await addAudio(to: stitched, from: clip, coveringDuration: stitchedDuration)
 
         // Map the requested session-timeline window onto the stitched timeline, then clamp: the
         // post-roll may still have been encoding when the clip was opened.
@@ -59,8 +60,8 @@ enum ClipComposer {
         return trimmed
     }
 
-    /// Lays the parts end to end, reproducing the recording session's timeline offset by the
-    /// first part's start.
+    /// Lays the video parts end to end, reproducing the recording session's timeline offset by
+    /// the first part's start. Video only; audio comes from the session file via `addAudio`.
     ///
     /// The parts are contiguous by construction — they come from one uninterrupted encode — so
     /// appending them in order is enough; no gap detection is needed.
@@ -69,9 +70,6 @@ enum ClipComposer {
         guard let stitchedVideo = stitched.addMutableTrack(
             withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid
         ) else { throw ComposeError.noVideoTrack }
-        let stitchedAudio = stitched.addMutableTrack(
-            withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid
-        )
 
         var cursor = CMTime.zero
         var transform: CGAffineTransform?
@@ -88,27 +86,51 @@ enum ClipComposer {
             if transform == nil {
                 transform = try await videoTrack.load(.preferredTransform)
             }
-
-            if let stitchedAudio,
-               let audioTrack = try await asset.loadTracks(withMediaType: .audio).first {
-                let audioRange = try await audioTrack.load(.timeRange)
-                // Audio fragments can be marginally shorter than their video counterparts. Placing
-                // audio at the *video* cursor rather than its own running total keeps a few lost
-                // milliseconds of sound from desynchronising everything after it.
-                try? stitchedAudio.insertTimeRange(audioRange, of: audioTrack, at: cursor)
-            }
-
             cursor = cursor + videoRange.duration
         }
 
         guard cursor > .zero else { throw ComposeError.emptyWindow }
         if let transform { stitchedVideo.preferredTransform = transform }
-        captureReport("""
-            stitched \(parts.count) parts: video=\(stitchedVideo.timeRange.duration.seconds)s \
-            audio=\(stitchedAudio?.timeRange.duration.seconds ?? -1)s
-            """)
-        removeEmptyTracks(from: stitched)
+        captureReport("stitched \(parts.count) parts: video=\(cursor.seconds)s")
         return stitched
+    }
+
+    /// Lays the session's continuous audio under the stitched video.
+    ///
+    /// Both files anchor their timelines on the first video frame, so the audio covering the
+    /// stitched span is simply `[clip.startSeconds, clip.startSeconds + duration]` of the audio
+    /// file, placed at zero. Best-effort throughout: a clip without sound is still a clip.
+    private static func addAudio(
+        to composition: AVMutableComposition,
+        from clip: SegmentStore.ReassembledClip,
+        coveringDuration duration: CMTime
+    ) async throws {
+        guard let audioURL = clip.audioURL else {
+            captureReport("audio: no session audio file")
+            return
+        }
+        let asset = AVURLAsset(url: audioURL, options: [AVURLAssetPreferPreciseDurationAndTimingKey: true])
+        guard let audioTrack = try await asset.loadTracks(withMediaType: .audio).first else {
+            captureReport("audio: session file has no audio track")
+            return
+        }
+        let available = try await audioTrack.load(.timeRange)
+        let wanted = CMTimeRange(
+            start: CMTime(seconds: clip.startSeconds, preferredTimescale: 600),
+            duration: duration
+        )
+        // The audio file is still being written during a game, so its readable extent can trail
+        // the video by up to one fragment. Take what's there.
+        let usable = CMTimeRangeGetIntersection(wanted, otherRange: available)
+        guard usable.duration > .zero else {
+            captureReport("audio: file covers \(available.start.seconds)–\(available.end.seconds)s, clip wants \(wanted.start.seconds)–\(wanted.end.seconds)s; none usable")
+            return
+        }
+        guard let target = composition.addMutableTrack(
+            withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid
+        ) else { return }
+        try target.insertTimeRange(usable, of: audioTrack, at: usable.start - wanted.start)
+        captureReport("audio: laid \(usable.duration.seconds)s of \(duration.seconds)s")
     }
 
     /// Drops tracks that ended up with no media in them.

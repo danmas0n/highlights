@@ -92,7 +92,11 @@ final class CaptureEngine {
         let queue = DispatchQueue(label: "highlights.writer")
         self.writerQueue = queue
         self.outputProxy = SampleBufferProxy(queue: queue)
-        self.recorder = SegmentRecorder(settings: settings, queue: queue)
+        // Placeholder until a session begins; every real recording gets its own recorder below.
+        self.recorder = SegmentRecorder(
+            settings: settings, queue: queue,
+            audioURL: FileManager.default.temporaryDirectory.appendingPathComponent("unused-audio.mp4")
+        )
         self.store = SegmentStore(
             directory: URL.applicationSupportDirectory.appendingPathComponent("segments", isDirectory: true),
             retention: settings.retention
@@ -177,7 +181,10 @@ final class CaptureEngine {
             // A fresh recorder per session: the writer can't be restarted once finished, and each
             // session needs its own initialization segment anyway. The queue is shared, so frames
             // keep arriving somewhere valid across the handoff.
-            let recorder = SegmentRecorder(settings: settings, queue: writerQueue)
+            let recorder = SegmentRecorder(
+                settings: settings, queue: writerQueue,
+                audioURL: await store.audioURL(for: sessionID)
+            )
             recorder.delegate = self
             self.recorder = recorder
             outputProxy.setRecorder(recorder)

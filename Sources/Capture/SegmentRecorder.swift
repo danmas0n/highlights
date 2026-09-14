@@ -65,9 +65,20 @@ final class SegmentRecorder: NSObject, @unchecked Sendable {
         frameClock.withLock { _lastVideoSampleAt }
     }
 
-    init(settings: CaptureSettings, queue: DispatchQueue) {
+    /// Audio goes to its own continuous file rather than into the segments.
+    ///
+    /// Muxing audio into HLS-segmented output turned out to fail two ways at once: the writer
+    /// stalls audio while interleaving it against video (a third of buffers were refused), and
+    /// what it did write came back unreadable from a single-fragment file. Audio at 64 kbps is
+    /// about half a megabyte a minute, so it needs neither segmenting nor pruning — one plain file
+    /// per session, muxed in at export by time range, and the whole problem disappears.
+    private let audioURL: URL
+    private var audioWriter: AVAssetWriter?
+
+    init(settings: CaptureSettings, queue: DispatchQueue, audioURL: URL) {
         self.settings = settings
         self.queue = queue
+        self.audioURL = audioURL
         super.init()
     }
 
@@ -113,6 +124,18 @@ final class SegmentRecorder: NSObject, @unchecked Sendable {
         guard writer.canAdd(video) else { throw RecorderError.cannotAddInput }
         writer.add(video)
 
+        guard writer.startWriting() else {
+            throw RecorderError.startFailed(writer.error?.localizedDescription ?? "unknown")
+        }
+
+        try? FileManager.default.removeItem(at: audioURL)
+        let audioWriter = try AVAssetWriter(outputURL: audioURL, fileType: .mp4)
+        // Fragmented, so the file is readable while still being written. Without this the moov
+        // atom only lands at finishWriting, and a clip opened mid-game would have no audio until
+        // the recording stopped. One-second fragments rather than the video's four: audio
+        // fragments cost almost nothing, and the readable extent then trails live by at most a
+        // second instead of leaving the tail of a just-stopped clip silent.
+        audioWriter.movieFragmentInterval = CMTime(seconds: 1, preferredTimescale: 1)
         let audio = AVAssetWriterInput(mediaType: .audio, outputSettings: [
             AVFormatIDKey: kAudioFormatMPEG4AAC,
             AVNumberOfChannelsKey: 1,
@@ -120,19 +143,16 @@ final class SegmentRecorder: NSObject, @unchecked Sendable {
             AVEncoderBitRateKey: 64_000,
         ])
         audio.expectsMediaDataInRealTime = true
-        if writer.canAdd(audio) {
-            writer.add(audio)
-            audioInput = audio
-        } else {
-            captureReport("audio: writer REFUSED the audio input")
-        }
-
-        guard writer.startWriting() else {
-            throw RecorderError.startFailed(writer.error?.localizedDescription ?? "unknown")
+        guard audioWriter.canAdd(audio) else { throw RecorderError.cannotAddInput }
+        audioWriter.add(audio)
+        guard audioWriter.startWriting() else {
+            throw RecorderError.startFailed(audioWriter.error?.localizedDescription ?? "audio writer")
         }
 
         self.writer = writer
         self.videoInput = video
+        self.audioWriter = audioWriter
+        self.audioInput = audio
         self.videoSamples = 0
         self.audioSamples = 0
         self.audioDropped = 0
@@ -154,8 +174,16 @@ final class SegmentRecorder: NSObject, @unchecked Sendable {
                 """)
             self.videoInput?.markAsFinished()
             self.audioInput?.markAsFinished()
-            writer.finishWriting { completion() }
+            // Finish both writers, then report once. Each is finished on its own rather than
+            // chained inside the other's completion, which would carry a non-Sendable writer
+            // into a @Sendable closure; a small counter joins them instead.
+            let pending = FinishGate(count: self.audioWriter?.status == .writing ? 2 : 1, then: completion)
+            writer.finishWriting { pending.arrive() }
+            if let audioWriter = self.audioWriter, audioWriter.status == .writing {
+                audioWriter.finishWriting { pending.arrive() }
+            }
             self.writer = nil
+            self.audioWriter = nil
         }
     }
 
@@ -182,28 +210,51 @@ final class SegmentRecorder: NSObject, @unchecked Sendable {
         if sessionStartPTS == nil {
             // Anchor on the first *video* frame. Anchoring on audio (which usually arrives first)
             // would open the session before any video exists, leaving a leading gap in the video
-            // track that every later composition would have to compensate for.
+            // track that every later composition would have to compensate for. The audio writer
+            // starts at the same instant, so the two files share a timeline origin.
             guard isVideo else { return }
             sessionStartPTS = pts
             writer.startSession(atSourceTime: pts)
+            audioWriter?.startSession(atSourceTime: pts)
         }
 
-        let input = isVideo ? videoInput : audioInput
-        guard let input, input.isReadyForMoreMediaData else {
-            if !isVideo {
+        if isVideo {
+            guard let videoInput, videoInput.isReadyForMoreMediaData else { return }
+            videoInput.append(sampleBuffer)
+            videoSamples += 1
+        } else {
+            guard let audioWriter, audioWriter.status == .writing,
+                  let audioInput, audioInput.isReadyForMoreMediaData else {
                 audioDropped += 1
-                if audioDropped == 1 {
-                    captureReport("audio: first buffer dropped (input=\(audioInput != nil), ready=\(audioInput?.isReadyForMoreMediaData ?? false))")
-                }
+                return
             }
-            return
+            audioInput.append(sampleBuffer)
+            audioSamples += 1
         }
-        input.append(sampleBuffer)
-        if isVideo { videoSamples += 1 } else { audioSamples += 1 }
 
         if isVideo, let start = sessionStartPTS {
             frameClock.withLock { _lastVideoSampleAt = Date() }
             delegate?.recorder(self, didAdvanceTo: pts - start)
+        }
+    }
+
+    /// Runs `then` once `count` arrivals have been recorded, from whichever thread arrives last.
+    private final class FinishGate: @unchecked Sendable {
+        private let lock = NSLock()
+        private var remaining: Int
+        private let then: @Sendable () -> Void
+
+        init(count: Int, then: @escaping @Sendable () -> Void) {
+            self.remaining = count
+            self.then = then
+        }
+
+        func arrive() {
+            let done: Bool = lock.withLock {
+                remaining -= 1
+                return remaining == 0
+            }
+            if done { then() }
         }
     }
 
