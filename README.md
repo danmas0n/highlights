@@ -1,4 +1,4 @@
-# Highlights
+# Highlights: Youth Sports Clips
 
 Mark the good moments during a game; get the clips, not the game.
 
@@ -69,6 +69,10 @@ Set your own team in `project.yml` (`DEVELOPMENT_TEAM`) and change
 
 **Real device only.** The Simulator has no camera; the app detects that and says so rather than
 hanging.
+
+App Store listing copy — name, subtitle, description, keywords, and notes for review — lives in
+[AppStore/listing.md](AppStore/listing.md). The name under the icon stays "Highlights"; iOS
+truncates anything longer there.
 
 The icon is generated rather than checked in as art:
 

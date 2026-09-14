@@ -27,9 +27,12 @@ struct AboutView: View {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text("Highlights")
                                     .font(.title2.weight(.bold))
+                                Text("Youth Sports Clips")
+                                    .font(.subheadline.weight(.medium))
+                                    .foregroundStyle(.secondary)
                                 Text("Version \(version)")
                                     .font(.footnote)
-                                    .foregroundStyle(.secondary)
+                                    .foregroundStyle(.tertiary)
                             }
                         }
 
