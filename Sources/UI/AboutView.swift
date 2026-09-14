@@ -66,10 +66,7 @@ struct AboutView: View {
                     Link(destination: URL(string: "https://jpsj.me")!) {
                         Label("Website", systemImage: "globe")
                     }
-                    Link(destination: URL(string: "https://github.com/danmas0n/highlights")!) {
-                        Label("Source code", systemImage: "chevron.left.forwardslash.chevron.right")
-                    }
-                    Link(destination: URL(string: "https://github.com/danmas0n/highlights/blob/main/PRIVACY.md")!) {
+                    Link(destination: URL(string: "https://jpsj.me/highlights/privacy")!) {
                         Label("Privacy policy", systemImage: "hand.raised")
                     }
                 } footer: {

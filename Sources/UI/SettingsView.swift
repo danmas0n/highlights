@@ -82,12 +82,17 @@ struct SettingsView: View {
                 }
 
                 Section {
+                    Toggle("Dim screen while recording", isOn: $model.settings.dimWhileRecording)
                     Toggle("Slow down when hot", isOn: $model.settings.reduceQualityWhenHot)
                     Toggle("Cinematic stabilization", isOn: $model.settings.stabilizationEnabled)
                 } header: {
-                    Text("Heat")
+                    Text("Heat and battery")
                 } footer: {
                     Text("""
+                    Dimming drops the screen to near-black a few seconds into recording. Tapping \
+                    still marks a moment, and a Wake button brings the screen back. The screen is a \
+                    real share of the power draw over a full game.
+
                     Recording 4K is genuinely demanding and the phone will get warm. \
                     "Slow down when hot" drops to 24 fps under thermal pressure — never resolution, \
                     because 4K is what gives you the free 2× zoom in the editor.
@@ -105,7 +110,7 @@ struct SettingsView: View {
                 } header: {
                     Text("Framing")
                 } footer: {
-                    Text("Shows the tightest crop you can pull losslessly. Keep your player inside the yellow brackets for a tight highlight, or anywhere in frame for a usable one. Don't zoom the camera — you have a free 2× waiting in the editor.")
+                    Text("Shows the tightest crop you can pull losslessly. Keep your player inside the yellow brackets for a tight highlight, or anywhere in frame for a usable one. Use the least optical zoom that makes your player big enough — the rest is free in the editor.")
                 }
 
                 Section {

@@ -58,6 +58,11 @@ struct CaptureSettings: Codable, Equatable {
 
     var showSafeFrame: Bool = true
 
+    /// Dim the screen automatically a few seconds into recording. Screen brightness is a real
+    /// share of power over two 40-minute halves, and on a tripod there's nothing to watch
+    /// between highlights; taps still mark, and a Wake button brings it back.
+    var dimWhileRecording: Bool = false
+
     /// Optical zoom, expressed the way the Camera app does — relative to the main camera, so 1.0
     /// is the wide lens and 5.0 is the telephoto.
     ///

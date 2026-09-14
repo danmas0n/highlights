@@ -9,6 +9,8 @@ struct CaptureView: View {
 
     @State private var showLibrary = false
     @State private var showSettings = false
+    @State private var showAbout = false
+    @State private var dimTask: Task<Void, Never>?
     @State private var flashOpacity: Double = 0
     @State private var markBanner: String?
     @State private var isDimmed = false
@@ -110,6 +112,12 @@ struct CaptureView: View {
         // little power saved.
         .sheet(isPresented: $showLibrary) { LibraryView() }
         .sheet(isPresented: $showSettings) { SettingsView() }
+        .sheet(isPresented: $showAbout) { AboutView() }
+        // Dimming is automatic rather than a button: on a tripod you want it to just happen
+        // once recording is underway, and to lift the moment you stop.
+        .onChange(of: isRecording) { _, recording in
+            if recording { scheduleDim(after: 8) } else { cancelDim(); if isDimmed { wake() } }
+        }
         .persistentSystemOverlays(.hidden)
     }
 
@@ -201,12 +209,7 @@ struct CaptureView: View {
 
             Spacer()
 
-            // Screen brightness is a meaningful share of the power draw over two 40-minute
-            // halves, and there is nothing to look at between highlights anyway.
-            chromeButton(isDimmed ? "sun.max.fill" : "moon.fill", isDimmed ? "Wake" : "Dim") {
-                isDimmed ? wake() : dim()
-            }
-            .disabled(!isRecording && !isDimmed)
+            chromeButton("info.circle", "About") { showAbout = true }
         }
         .padding(.horizontal, 14).padding(.vertical, 10)
         .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
@@ -369,6 +372,21 @@ struct CaptureView: View {
         }
     }
 
+    private func scheduleDim(after seconds: Double) {
+        cancelDim()
+        guard model.settings.dimWhileRecording else { return }
+        dimTask = Task {
+            try? await Task.sleep(for: .seconds(seconds))
+            guard !Task.isCancelled, isRecording else { return }
+            dim()
+        }
+    }
+
+    private func cancelDim() {
+        dimTask?.cancel()
+        dimTask = nil
+    }
+
     private func dim() {
         restoreBrightness = UIScreen.main.brightness
         isDimmed = true
@@ -380,6 +398,8 @@ struct CaptureView: View {
         // Never restore to something unusable — if we somehow captured a near-zero value, hand
         // back something the user can actually see and correct.
         UIScreen.main.brightness = max(restoreBrightness, 0.35)
+        // Waking is for a glance; go back to sleep unless the recording has ended.
+        if isRecording { scheduleDim(after: 20) }
     }
 
     private func timecode(_ seconds: Double) -> String {
