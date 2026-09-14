@@ -47,4 +47,5 @@ Highlights collects no data from anyone, of any age.
 
 ## Contact
 
-Questions about this policy: <https://jpsj.me>.
+Questions about this policy: open an issue at <https://github.com/danmas0n/highlights/issues>,
+or visit <https://jpsj.me>.

@@ -50,7 +50,7 @@ BUILT FOR A REAL SIDELINE
 
 PRIVATE BY DESIGN
 There's no account, no server, and no analytics. Footage never leaves your phone unless you save
-a clip to Photos.
+a clip to Photos. The source code is public.
 
 I built this for my own son's high school and club games. If you've got a kid who plays anything,
 I hope it's useful to you too. It's free. There's a tip jar if it earns you a highlight you'd have
@@ -72,7 +72,8 @@ Secondary: Sports
 ## URLs
 
 Support:  https://jpsj.me
-Privacy:  https://jpsj.me/highlights/privacy
+Privacy:  https://github.com/danmas0n/highlights/blob/main/PRIVACY.md
+Marketing (optional): https://github.com/danmas0n/highlights
 
 ## App Privacy questionnaire
 
