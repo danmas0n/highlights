@@ -3,6 +3,7 @@ import SwiftUI
 struct SettingsView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
+    @State private var showAbout = false
 
     var body: some View {
         // `@Observable` types reached through `@Environment` need this to hand out bindings.
@@ -133,12 +134,21 @@ struct SettingsView: View {
                 } footer: {
                     Text("Removes the marks and lets their footage be discarded. Clips already saved to Photos are untouched.")
                 }
+
+                Section {
+                    Button {
+                        showAbout = true
+                    } label: {
+                        Label("About Highlights", systemImage: "info.circle")
+                    }
+                }
             }
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
             }
+            .sheet(isPresented: $showAbout) { AboutView() }
         }
     }
 

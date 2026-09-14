@@ -64,7 +64,8 @@ xcodegen generate && open Highlights.xcodeproj
 ```
 
 Set your own team in `project.yml` (`DEVELOPMENT_TEAM`) and change
-`PRODUCT_BUNDLE_IDENTIFIER` — a bundle ID can only be claimed once.
+`PRODUCT_BUNDLE_IDENTIFIER` — a bundle ID can only be claimed once. The tip-jar product IDs in
+`TipJar.swift` and `Resources/Highlights.storekit` are tied to that bundle ID too.
 
 **Real device only.** The Simulator has no camera; the app detects that and says so rather than
 hanging.
@@ -94,7 +95,11 @@ Sources/
   Triggers/
     TriggerCoordinator.swift       Fan-in for all trigger sources, with debounce
     KeyCommandCatcher.swift        Bluetooth clickers that present as a keyboard
+  Support/
+    TipJar.swift                   StoreKit 2 consumables; gates nothing
   UI/
+    OnboardingView.swift           First-run tour, reachable again from About
+    AboutView.swift                Who made it and why, links, tip jar
     CaptureView.swift              The sideline screen
     SafeFrameOverlay.swift         Shows how much room you have to be wrong
     HighlightEditorView.swift      Trim, framing, auto-follow, export
@@ -155,10 +160,10 @@ uncropped is genuinely 4K and a 2× crop is exactly 1080p, neither one scaled.
 Start-up and every fault are logged under a dedicated subsystem:
 
 ```bash
-xcrun devicectl device process launch --device <udid> --console --terminate-existing com.danmason.highlights
+xcrun devicectl device process launch --device <udid> --console --terminate-existing me.jpsj.highlights
 ```
 
-Or filter by `subsystem == "com.danmason.highlights"` in Console.app.
+Or filter by `subsystem == "me.jpsj.highlights"` in Console.app.
 
 ## Not built yet
 

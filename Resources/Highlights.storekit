@@ -1,0 +1,64 @@
+{
+  "identifier" : "2C7F5E1A-1B3D-4A0E-9C8B-6D5F4E3A2B1C",
+  "nonRenewingSubscriptions" : [
+
+  ],
+  "products" : [
+    {
+      "displayPrice" : "1.99",
+      "familyShareable" : false,
+      "internalID" : "6F1A2B3C4D5E",
+      "localizations" : [
+        {
+          "description" : "A coffee for the sideline.",
+          "displayName" : "Coffee",
+          "locale" : "en_US"
+        }
+      ],
+      "productID" : "me.jpsj.highlights.tip.small",
+      "referenceName" : "Tip — Coffee",
+      "type" : "Consumable"
+    },
+    {
+      "displayPrice" : "4.99",
+      "familyShareable" : false,
+      "internalID" : "7A2B3C4D5E6F",
+      "localizations" : [
+        {
+          "description" : "Post-game pizza for the team.",
+          "displayName" : "Post-game pizza",
+          "locale" : "en_US"
+        }
+      ],
+      "productID" : "me.jpsj.highlights.tip.medium",
+      "referenceName" : "Tip — Pizza",
+      "type" : "Consumable"
+    },
+    {
+      "displayPrice" : "9.99",
+      "familyShareable" : false,
+      "internalID" : "8B3C4D5E6F7A",
+      "localizations" : [
+        {
+          "description" : "You're basically sponsoring the club.",
+          "displayName" : "Season sponsor",
+          "locale" : "en_US"
+        }
+      ],
+      "productID" : "me.jpsj.highlights.tip.large",
+      "referenceName" : "Tip — Sponsor",
+      "type" : "Consumable"
+    }
+  ],
+  "settings" : {
+    "_applicationInternalID" : "",
+    "_developerTeamID" : "N63WL95J2F"
+  },
+  "subscriptionGroups" : [
+
+  ],
+  "version" : {
+    "major" : 3,
+    "minor" : 0
+  }
+}

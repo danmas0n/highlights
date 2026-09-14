@@ -13,6 +13,8 @@ struct CaptureView: View {
     @State private var markBanner: String?
     @State private var isDimmed = false
     @State private var restoreBrightness: CGFloat = UIScreen.main.brightness
+    @AppStorage("onboarding.seen") private var hasSeenTour = false
+    @State private var showTour = false
 
     private var isRecording: Bool { model.engine.state == .recording }
 
@@ -78,7 +80,19 @@ struct CaptureView: View {
         }
         .task {
             model.triggers.onTrigger = handleTrigger
-            await model.engine.startCamera()
+            // The tour goes first on a fresh install so the camera permission prompt arrives
+            // after the app has explained what it's for, not before.
+            if hasSeenTour {
+                await model.engine.startCamera()
+            } else {
+                showTour = true
+            }
+        }
+        .fullScreenCover(isPresented: $showTour, onDismiss: {
+            hasSeenTour = true
+            Task { await model.engine.startCamera() }
+        }) {
+            OnboardingView()
         }
         .onChange(of: scenePhase) { _, phase in
             // iOS suspends capture in the background regardless, so make the stop explicit rather

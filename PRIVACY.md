@@ -1,6 +1,8 @@
 # Privacy Policy — Highlights
 
-_Last updated: 5 September 2026_
+_Last updated: 13 September 2026_
+
+Highlights is made by **JPSJ Consulting LLC**, New Jersey, USA.
 
 Highlights does not collect, transmit, or share any personal information.
 
@@ -26,6 +28,12 @@ a clip to your photo library, at which point it is handled by iOS as any other v
 You can delete any clip from the Clips list, and remove all stored footage at any time from
 Settings → Storage → Delete all stored footage. Deleting the app removes everything it holds.
 
+## Tips
+
+The app offers optional tips through Apple's in-app purchase system. Tipping unlocks nothing.
+Payment is handled entirely by Apple; the app never sees your payment details, and no record of a
+tip is sent anywhere other than a count kept on your device so the app can say thank you.
+
 ## Permissions
 
 - **Camera** — to record video. Required.
@@ -39,5 +47,5 @@ Highlights collects no data from anyone, of any age.
 
 ## Contact
 
-Questions about this policy: open an issue at
-<https://github.com/danmas0n/highlights/issues>.
+Questions about this policy: open an issue at <https://github.com/danmas0n/highlights/issues>,
+or visit <https://jpsj.me>.

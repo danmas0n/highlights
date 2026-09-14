@@ -31,6 +31,7 @@ final class AppModel {
     let library = HighlightLibrary()
     let triggers = TriggerCoordinator()
     let extractor: HighlightExtractor
+    let tipJar = TipJar()
 
     init() {
         let settings = CaptureSettings.load()

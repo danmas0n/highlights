@@ -5,7 +5,7 @@ import UIKit
 
 /// Shared diagnostic log. A capture app that fails silently on a tripod is useless, so the
 /// start-up path and every fault are traceable after the fact via Console or `log show`.
-let captureLog = Logger(subsystem: "com.danmason.highlights", category: "capture")
+let captureLog = Logger(subsystem: "me.jpsj.highlights", category: "capture")
 
 /// Writes to both the unified log and stdout.
 ///
