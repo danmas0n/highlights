@@ -11,11 +11,17 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 # Bump CFBundleVersion in project.yml and regenerate.
-current=$(grep -E '^\s+CFBundleVersion:' project.yml | sed -E 's/.*"([0-9]+)".*/\1/')
+# [[:space:]] rather than \s: macOS ships BSD sed, which doesn't know \s and silently matches
+# nothing — which uploaded a stale build number once while claiming the new one.
+current=$(grep -E '^[[:space:]]+CFBundleVersion:' project.yml | sed -E 's/.*"([0-9]+)".*/\1/')
 next=$((current + 1))
-sed -i '' -E "s/^(\s+CFBundleVersion: )\"$current\"/\1\"$next\"/" project.yml
+sed -i '' -E "s/^([[:space:]]+CFBundleVersion: )\"$current\"/\1\"$next\"/" project.yml
 xcodegen generate >/dev/null
-version=$(grep -E '^\s+CFBundleShortVersionString:' project.yml | sed -E 's/.*"([^"]+)".*/\1/')
+# Verify the bump actually landed before spending five minutes on an archive that will be rejected.
+if ! grep -qE "^[[:space:]]+CFBundleVersion: \"$next\"" project.yml; then
+  echo "Failed to bump CFBundleVersion in project.yml" >&2; exit 1
+fi
+version=$(grep -E '^[[:space:]]+CFBundleShortVersionString:' project.yml | sed -E 's/.*"([^"]+)".*/\1/')
 echo "Uploading $version ($next)"
 
 work=$(mktemp -d)
