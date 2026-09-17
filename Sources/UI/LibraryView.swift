@@ -63,52 +63,88 @@ struct LibraryView: View {
         }
     }
 
+    /// Clips grouped by the day they were marked, so two games in a weekend don't run together.
+    private var days: [(date: Date, clips: [Highlight])] {
+        let calendar = Calendar.current
+        let grouped = Dictionary(grouping: sortedHighlights) { calendar.startOfDay(for: $0.markedAt) }
+        // Keep the days in the same order the clips already are, rather than re-sorting.
+        var seen: [Date] = []
+        for clip in sortedHighlights {
+            let day = calendar.startOfDay(for: clip.markedAt)
+            if !seen.contains(day) { seen.append(day) }
+        }
+        return seen.map { ($0, grouped[$0] ?? []) }
+    }
+
+    private static let dayFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .full
+        formatter.timeStyle = .none
+        // "Today" and "Yesterday" for the recent ones; a full weekday-and-date otherwise.
+        formatter.doesRelativeDateFormatting = true
+        return formatter
+    }()
+
     private var list: some View {
         List {
-            ForEach(sortedHighlights) { highlight in
-                Button {
-                    editing = highlight
-                } label: {
-                    HStack(spacing: 14) {
-                        ZStack {
-                            RoundedRectangle(cornerRadius: 8)
-                                .fill(.quaternary)
-                                .frame(width: 72, height: 40)
-                            Image(systemName: highlight.isExported ? "checkmark.circle.fill" : "scissors")
-                                .foregroundStyle(highlight.isExported ? .green : .secondary)
-                        }
-
-                        VStack(alignment: .leading, spacing: 3) {
-                            // Lead with the wall clock. "Mark at 0:32" is ambiguous once there's
-                            // more than one recording, since each starts counting from zero again.
-                            Text(highlight.title.isEmpty
-                                 ? highlight.markedAt.formatted(date: .omitted, time: .shortened)
-                                 : highlight.title)
-                                .font(.body.weight(.medium))
-                            Text("\(Int(highlight.trimmedDurationSeconds))s")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-
-                        Spacer()
-
-                        if highlight.cropPath != nil {
-                            Image(systemName: "crop")
-                                .font(.caption)
-                                .foregroundStyle(.tint)
-                        }
-                        Image(systemName: "chevron.right")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.tertiary)
+            ForEach(days, id: \.date) { day in
+                Section {
+                    ForEach(day.clips) { highlight in
+                        row(highlight)
                     }
+                    .onDelete { indexSet in
+                        let doomed = indexSet.map { day.clips[$0] }
+                        Task { for highlight in doomed { await model.delete(highlight) } }
+                    }
+                } header: {
+                    Text(Self.dayFormatter.string(from: day.date))
                 }
-                .buttonStyle(.plain)
-            }
-            .onDelete { indexSet in
-                let doomed = indexSet.map { sortedHighlights[$0] }
-                Task { for highlight in doomed { await model.delete(highlight) } }
             }
         }
+    }
+
+    private func row(_ highlight: Highlight) -> some View {
+        Button {
+            editing = highlight
+        } label: {
+            HStack(spacing: 14) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(.quaternary)
+                        .frame(width: 72, height: 40)
+                    Image(systemName: highlight.isExported ? "checkmark.circle.fill" : "scissors")
+                        .foregroundStyle(highlight.isExported ? .green : .secondary)
+                }
+
+                VStack(alignment: .leading, spacing: 3) {
+                    // Lead with the wall clock. "Mark at 0:32" is ambiguous once there's more
+                    // than one recording, since each starts counting from zero again.
+                    Text(highlight.title.isEmpty
+                         ? highlight.markedAt.formatted(date: .omitted, time: .shortened)
+                         : highlight.title)
+                        .font(.body.weight(.medium))
+                    Text("\(Int(highlight.trimmedDurationSeconds))s")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer()
+
+                if highlight.cropPath != nil {
+                    Image(systemName: "crop")
+                        .font(.caption)
+                        .foregroundStyle(.tint)
+                }
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+            }
+            // Make the empty space between the text and the chevron count as the button. With a
+            // plain button style only the drawn content is hit-testable, so taps in the gap —
+            // most of the row — used to do nothing.
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     /// Bulk export with no crop applied — the "just give me everything, I'll look later" path.

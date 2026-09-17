@@ -82,14 +82,14 @@ struct SettingsView: View {
                 }
 
                 Section {
-                    Toggle("Dim screen while recording", isOn: $model.settings.dimWhileRecording)
+                    Toggle("Dim screen while watching", isOn: $model.settings.dimWhileRecording)
                     Toggle("Slow down when hot", isOn: $model.settings.reduceQualityWhenHot)
                     Toggle("Cinematic stabilization", isOn: $model.settings.stabilizationEnabled)
                 } header: {
                     Text("Heat and battery")
                 } footer: {
                     Text("""
-                    Dimming drops the screen to near-black a few seconds into recording. Tapping \
+                    Dimming drops the screen to near-black a few seconds after you open the eye. Tapping \
                     still marks a moment, and a Wake button brings the screen back. The screen is a \
                     real share of the power draw over a full game.
 
@@ -101,7 +101,7 @@ struct SettingsView: View {
                     and also a real share of the heat. Turn it off if the phone struggles.
 
                     Biggest wins are physical: keep the phone out of direct sun, take the case off, \
-                    and only record when play is live.
+                    and only watch when play is live.
                     """)
                 }
 

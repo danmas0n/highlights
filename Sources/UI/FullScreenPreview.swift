@@ -23,9 +23,6 @@ struct FullScreenPreview: View {
 
     @Binding var cropCenter: CGPoint
     @Binding var cropWidth: Double
-    /// The tracked camera move, if there is one — read-only here; framing by hand happens in
-    /// full-frame mode and replaces it.
-    let cropPath: CropPath?
 
     @Environment(\.dismiss) private var dismiss
 
@@ -158,14 +155,14 @@ struct FullScreenPreview: View {
     private var cropOverlay: some View {
         GeometryReader { geometry in
             let frame = videoFrame(in: geometry.size)
-            let effective = liveCenter
+            let effective = cropCenter
             let box = CGSize(
                 width: frame.width * cropWidth * pinchScale,
                 height: frame.height * cropWidth * pinchScale
             )
             ZStack {
                 Rectangle()
-                    .strokeBorder(cropPath?.isStatic == false ? .green : .yellow, lineWidth: 2)
+                    .strokeBorder(.yellow, lineWidth: 2)
                     .frame(width: box.width, height: box.height)
                     .position(
                         x: (geometry.size.width - frame.width) / 2 + effective.x * frame.width,
@@ -178,12 +175,6 @@ struct FullScreenPreview: View {
             }
         }
         .allowsHitTesting(false)
-    }
-
-    private var liveCenter: CGPoint {
-        guard let path = cropPath, !path.isStatic else { return cropCenter }
-        let rect = path.rect(at: playhead - trimStart, sourceAspect: 16.0 / 9.0)
-        return CGPoint(x: rect.midX, y: rect.midY)
     }
 
     private var framingGesture: some Gesture {
@@ -248,7 +239,7 @@ struct FullScreenPreview: View {
             player.currentItem?.videoComposition = nil
             return
         }
-        let path = cropPath ?? .fixed(center: cropCenter, widthFraction: cropWidth)
+        let path = CropPath.fixed(center: cropCenter, widthFraction: cropWidth)
         guard !path.isFullFrame else {
             player.currentItem?.videoComposition = nil
             return

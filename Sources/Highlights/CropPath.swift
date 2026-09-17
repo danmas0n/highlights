@@ -1,7 +1,10 @@
 import CoreGraphics
 import Foundation
 
-/// A crop window that can move over the course of a clip — the synthetic camera operator.
+/// A crop window over a clip.
+///
+/// Keyframed so a moving crop is possible in future — the interpolation and the transform-ramp
+/// export path both handle it — but nothing in the app currently produces more than one keyframe.
 ///
 /// Coordinates are normalized to the source frame (0–1, origin top-left) so a path stays valid
 /// if the source resolution changes. The window's aspect ratio is fixed to the delivery aspect;
@@ -76,77 +79,5 @@ struct CropPath: Codable, Equatable {
             )
         }
         return sorted[sorted.count - 1]
-    }
-
-    // MARK: - Smoothing
-
-    /// Turns raw per-frame tracker output into something that looks like a human operator.
-    ///
-    /// Three ideas, all of which matter:
-    ///  - **Dead zone**: the camera doesn't move at all while the subject is near the middle.
-    ///    Without this the crop micro-jitters continuously and the clip is nauseating.
-    ///  - **Critically damped easing**: the window eases toward the target instead of snapping.
-    ///  - **Velocity limit**: caps how fast the window can travel, so a tracker glitch that
-    ///    teleports the subject across the frame produces a slow drift rather than a whip pan.
-    static func smoothed(
-        observations: [(time: Double, center: CGPoint)],
-        widthFraction: Double,
-        deadZone: Double = 0.06,
-        easing: Double = 0.12,
-        maxSpeedPerSecond: Double = 0.35
-    ) -> CropPath {
-        guard let first = observations.first else { return .fixed(widthFraction: widthFraction) }
-
-        var keyframes: [Keyframe] = []
-        var current = first.center
-        var previousTime = first.time
-
-        for observation in observations {
-            let dt = max(observation.time - previousTime, 1.0 / 120.0)
-            previousTime = observation.time
-
-            let dx = observation.center.x - current.x
-            let dy = observation.center.y - current.y
-            let distance = (dx * dx + dy * dy).squareRoot()
-
-            if distance > deadZone {
-                // Pull toward the edge of the dead zone, not toward the subject itself, so the
-                // window comes to rest with the subject comfortably off-centre rather than
-                // hunting around dead centre.
-                let target = distance - deadZone
-                let scale = (target / distance) * easing
-                var stepX = dx * scale
-                var stepY = dy * scale
-
-                let stepLength = (stepX * stepX + stepY * stepY).squareRoot()
-                let maxStep = maxSpeedPerSecond * dt
-                if stepLength > maxStep, stepLength > 0 {
-                    stepX *= maxStep / stepLength
-                    stepY *= maxStep / stepLength
-                }
-                current = CGPoint(x: current.x + stepX, y: current.y + stepY)
-            }
-
-            keyframes.append(Keyframe(time: observation.time, center: current, widthFraction: widthFraction))
-        }
-
-        return CropPath(keyframes: decimate(keyframes))
-    }
-
-    /// Drops keyframes that add nothing, so the exported video composition carries a handful of
-    /// transform ramps instead of one per frame.
-    private static func decimate(_ keyframes: [Keyframe], tolerance: Double = 0.004) -> [Keyframe] {
-        guard var last = keyframes.first else { return keyframes }
-        var result = [last]
-        for key in keyframes.dropFirst() {
-            let dx = key.center.x - last.center.x
-            let dy = key.center.y - last.center.y
-            if (dx * dx + dy * dy).squareRoot() > tolerance || key.time - last.time > 0.5 {
-                result.append(key)
-                last = key
-            }
-        }
-        if let final = keyframes.last, result.last?.time != final.time { result.append(final) }
-        return result
     }
 }

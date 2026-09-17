@@ -135,7 +135,7 @@ struct CaptureView: View {
                 }
                 Text(isRecording
                      ? "\(Int(model.engine.availableHistory.seconds))s of history · \(model.engine.activeLens)"
-                     : "Standby · \(model.engine.activeLens)")
+                     : "Not watching · \(model.engine.activeLens)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -187,7 +187,7 @@ struct CaptureView: View {
     private var hintText: some View {
         Text(isRecording
              ? "Tap anywhere to mark the last \(Int(model.settings.preRollSeconds))s"
-             : "Press record to start")
+             : "Tap the eye to start watching")
             .font(.footnote.weight(.medium))
             .foregroundStyle(.secondary)
             .lineLimit(1)
@@ -205,7 +205,7 @@ struct CaptureView: View {
 
             Spacer()
 
-            recordButton
+            watchButton
 
             Spacer()
 
@@ -245,9 +245,14 @@ struct CaptureView: View {
         }
     }
 
-    /// Halftime, warm-ups, and the drive home all want the camera off. Recording only when you
-    /// say so is also the single biggest lever on heat and battery.
-    private var recordButton: some View {
+    /// An eye, not a record button.
+    ///
+    /// A record button promises a video at the end, and this doesn't give you one — it watches,
+    /// keeps the recent past, and hands you only the moments you point at. Calling it "record"
+    /// set exactly the wrong expectation. Closed eye: not watching. Open red eye: watching.
+    /// Halftime, warm-ups, and the drive home all want it closed; watching only when you say so
+    /// is also the single biggest lever on heat and battery.
+    private var watchButton: some View {
         Button {
             Task {
                 if isRecording {
@@ -258,19 +263,28 @@ struct CaptureView: View {
                 UIImpactFeedbackGenerator(style: .medium).impactOccurred()
             }
         } label: {
-            ZStack {
-                Circle()
-                    .strokeBorder(.white.opacity(0.9), lineWidth: 3)
-                    .frame(width: 54, height: 54)
-                RoundedRectangle(cornerRadius: isRecording ? 4 : 20)
-                    .fill(.red)
-                    .frame(width: isRecording ? 22 : 40, height: isRecording ? 22 : 40)
-                    .animation(.spring(duration: 0.25), value: isRecording)
+            VStack(spacing: 4) {
+                ZStack {
+                    Circle()
+                        .fill(isRecording ? Color.red : Color.white.opacity(0.14))
+                        .frame(width: 58, height: 58)
+                    Circle()
+                        .strokeBorder(isRecording ? Color.red.opacity(0.5) : Color.white.opacity(0.9), lineWidth: 3)
+                        .frame(width: 58, height: 58)
+                    Image(systemName: isRecording ? "eye.fill" : "eye.slash")
+                        .font(.system(size: 24, weight: .semibold))
+                        .foregroundStyle(.white)
+                        .contentTransition(.symbolEffect(.replace))
+                }
+                .animation(.spring(duration: 0.25), value: isRecording)
+                Text(isRecording ? "Watching" : "Watch")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(isRecording ? .red : .white)
             }
         }
         .buttonStyle(.plain)
         .disabled(model.engine.state == .starting)
-        .accessibilityLabel(isRecording ? "Stop recording" : "Start recording")
+        .accessibilityLabel(isRecording ? "Stop watching" : "Start watching")
     }
 
     private func chromeButton(_ icon: String, _ label: String, action: @escaping () -> Void) -> some View {

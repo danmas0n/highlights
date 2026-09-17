@@ -29,10 +29,12 @@ a table, where nothing is moving.
 
 The app opens in **standby** — camera live so you can frame the shot, nothing being written.
 
-- **Record** starts capture. Halftime? Stop, and start again after — each recording is its own
-  session and previous clips stay intact.
+- **The eye** starts and stops watching. It's deliberately not a record button: you don't get a
+  video at the end, you get the moments you pointed at. Halftime? Close it, open it again after —
+  each stretch is its own session and previous clips stay intact.
 - **Tap anywhere** to mark a moment. A Bluetooth clicker that sends a keyboard key works too.
-- **Dim** drops screen brightness to near zero while still recording and still accepting taps.
+- **Dim** (Settings) drops screen brightness to near zero a few seconds after the eye opens, still
+  accepting taps.
 - **Clips** lists what you marked. Open one to trim it, frame the crop, and save to Photos.
 
 ### Field notes
@@ -93,9 +95,8 @@ Sources/
   Highlights/
     Highlight.swift                The mark model + persisted library
     ClipComposer.swift             Stitches segments into a correctly-timed asset
-    CropPath.swift                 Time-varying crop window + the smoothing that makes it watchable
+    CropPath.swift                 Crop window, keyframed for a moving crop
     HighlightExtractor.swift       Compose → crop → export → Photos
-    SubjectTracker.swift           Offline Vision tracking to build a camera move
   Triggers/
     TriggerCoordinator.swift       Fan-in for all trigger sources, with debounce
     KeyCommandCatcher.swift        Bluetooth clickers that present as a keyboard
@@ -106,7 +107,7 @@ Sources/
     AboutView.swift                Who made it and why, links, tip jar
     CaptureView.swift              The sideline screen
     SafeFrameOverlay.swift         Shows how much room you have to be wrong
-    HighlightEditorView.swift      Trim, framing, auto-follow, export
+    HighlightEditorView.swift      Trim, framing, export
     TrimBar.swift                  Two-handle trim control
     LibraryView.swift, SettingsView.swift, CameraPreview.swift
 ```

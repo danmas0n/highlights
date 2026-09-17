@@ -20,7 +20,7 @@ happens; the moment is already saved. Free, no account, nothing leaves your phon
 You're on the sideline. Your kid does something great. By the time you get your phone up, it's
 over.
 
-Highlights fixes that. Put your phone on a tripod, press record, and forget about it. When
+Highlights fixes that. Put your phone on a tripod, open the eye, and forget about it. When
 something good happens, tap the screen — the previous 25 seconds, plus a few after, become a clip.
 No filming the whole game. No scrubbing through ninety minutes on Sunday night to find the two
 moments that mattered.
@@ -38,13 +38,13 @@ exactly 1080p — nothing is upscaled. Your phone's real lenses are there when t
 
 EDIT ON THE SPOT
 • Trim with drag handles, like Photos
-• Frame the crop, or let auto-follow track your player
+• Frame the crop around the action
 • Full-screen review to see whether it was actually any good
 • Save to your camera roll and send it to the grandparents (or a college coach)
 
 BUILT FOR A REAL SIDELINE
 • Halftime? Stop and restart. Every clip stays intact
-• Dim the screen to save battery while still recording and still accepting taps
+• Dim the screen to save battery while still watching and still accepting taps
 • Marks survive the app being closed, so a hot phone doesn't cost you the first half
 • A Bluetooth camera clicker works if you'd rather not touch the phone
 
@@ -92,10 +92,11 @@ nothing" at first glance. The first launch shows a four-screen tour explaining t
 exercise it:
 
 1. Allow camera and microphone access when prompted.
-2. Point the phone at anything and press the red record button at the bottom.
+2. Point the phone at anything and tap the eye button at the bottom centre. It turns red and reads
+   "Watching" — the app is now keeping the recent past.
 3. Wait about 20 seconds, then tap anywhere on the screen. A white flash and a "Marked" banner
    confirm the moment was saved.
-4. Press the record button again to stop.
+4. Tap the eye again to stop.
 5. Tap "Clips" (bottom left). The marked moment is listed. Open it to play, trim, and frame it;
    "Save to Photos" exports it to the camera roll.
 

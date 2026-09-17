@@ -14,8 +14,8 @@ struct HighlightEditorView: View {
     @State private var endObserver: NSObjectProtocol?
     /// Per-segment files backing the preview. Owned by this view; deleted on close.
     @State private var clip: SegmentStore.ReassembledClip?
-    /// Where the capture window begins inside those files — the tracker reads them directly and
-    /// needs to add this back, since the player runs on a trimmed composition starting at zero.
+    /// Where the capture window begins inside those files, since the player runs on a trimmed
+    /// composition starting at zero.
     @State private var clipOffset: Double = 0
     @State private var windowDuration: Double = 0
     /// Held so the full-screen preview can re-composite the crop against the same asset.
@@ -32,7 +32,6 @@ struct HighlightEditorView: View {
     /// accelerates away from your finger.
     @State private var cropDragAnchor: CGPoint?
     @State private var cropWidth: Double = 0.5
-    @State private var isTracking = false
     @State private var isExporting = false
     @State private var exportProgress: Float = 0
     @State private var status: String?
@@ -80,16 +79,15 @@ struct HighlightEditorView: View {
                         trimStart: trimStart,
                         trimEnd: trimEnd,
                         cropCenter: $cropCenter,
-                        cropWidth: $cropWidth,
-                        cropPath: highlight.cropPath
+                        cropWidth: $cropWidth
                     )
                     .onDisappear {
                         // Framing done full-screen is the real framing; carry it back, and drop
                         // the crop composition so the inline view returns to the full frame with
                         // its rectangle overlay.
-                        if highlight.cropPath?.isStatic != false {
-                            highlight.cropPath = .fixed(center: cropCenter, widthFraction: cropWidth)
-                        }
+                        highlight.cropPath = cropWidth >= 0.999
+                            ? nil
+                            : .fixed(center: cropCenter, widthFraction: cropWidth)
                         player.currentItem?.videoComposition = nil
                         seek(trimStart)
                     }
@@ -125,7 +123,13 @@ struct HighlightEditorView: View {
                     // Our own transport sits below; the system controls would fight the crop
                     // rectangle for the same taps.
                     .disabled(true)
-                    .onTapGesture { showFullScreen = true }
+                    // The tap has to go on an overlay, not the player: a disabled view drops
+                    // gestures attached to it, which is why tapping the video used to do nothing.
+                    .overlay {
+                        Color.clear
+                            .contentShape(Rectangle())
+                            .onTapGesture { showFullScreen = true }
+                    }
             } else {
                 ProgressView()
             }
@@ -135,11 +139,11 @@ struct HighlightEditorView: View {
             GeometryReader { geometry in
                 let frame = videoFrame(in: geometry.size)
                 let box = CGSize(width: frame.width * cropWidth, height: frame.height * cropWidth)
-                let live = liveCropCenter
+                let live = cropCenter
 
                 Rectangle()
-                    .strokeBorder(isFollowing ? .green : .yellow, lineWidth: 2)
-                    .background(Rectangle().fill((isFollowing ? Color.green : Color.yellow).opacity(0.06)))
+                    .strokeBorder(.yellow, lineWidth: 2)
+                    .background(Rectangle().fill(Color.yellow.opacity(0.06)))
                     .frame(width: box.width, height: box.height)
                     .position(
                         x: (geometry.size.width - frame.width) / 2 + live.x * frame.width,
@@ -148,8 +152,6 @@ struct HighlightEditorView: View {
                     .gesture(
                         DragGesture()
                             .onChanged { value in
-                                // Dragging by hand replaces any tracked camera move — you can't
-                                // meaningfully nudge a path that's moving underneath you.
                                 let anchor = cropDragAnchor ?? live
                                 if cropDragAnchor == nil { cropDragAnchor = anchor }
                                 cropCenter = CGPoint(
@@ -161,32 +163,27 @@ struct HighlightEditorView: View {
                             .onEnded { _ in cropDragAnchor = nil }
                     )
             }
-            .allowsHitTesting(!isTracking)
 
-            if isTracking {
-                VStack(spacing: 8) {
-                    ProgressView()
-                    Text("Following your player…").font(.caption)
+            // A full-screen button where every video player keeps one, sized for a thumb.
+            VStack {
+                Spacer()
+                HStack {
+                    Spacer()
+                    Button {
+                        showFullScreen = true
+                    } label: {
+                        Image(systemName: "arrow.up.left.and.arrow.down.right")
+                            .font(.body.weight(.bold))
+                            .frame(width: 44, height: 44)
+                            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 10))
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(composition == nil)
+                    .padding(10)
                 }
-                .padding(20)
-                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
             }
         }
         .aspectRatio(16.0 / 9.0, contentMode: .fit)
-    }
-
-    /// True once a tracked camera move exists, as opposed to a fixed crop.
-    private var isFollowing: Bool { highlight.cropPath?.isStatic == false }
-
-    /// Where the crop window sits *right now*.
-    ///
-    /// With a tracked path this is sampled at the playhead, so the box visibly follows your
-    /// player during playback. Without it the preview showed a static rectangle no matter what
-    /// auto-follow produced, which made the feature impossible to judge.
-    private var liveCropCenter: CGPoint {
-        guard let path = highlight.cropPath, !path.isStatic else { return cropCenter }
-        let rect = path.rect(at: playhead - trimStart, sourceAspect: 16.0 / 9.0)
-        return CGPoint(x: rect.midX, y: rect.midY)
     }
 
     // MARK: - Transport
@@ -213,15 +210,6 @@ struct HighlightEditorView: View {
                 Text(timecode(windowDuration))
                     .font(.footnote.monospacedDigit())
                     .foregroundStyle(.secondary)
-
-                Button {
-                    showFullScreen = true
-                } label: {
-                    Image(systemName: "arrow.up.left.and.arrow.down.right")
-                        .font(.footnote.weight(.semibold))
-                }
-                .buttonStyle(.plain)
-                .disabled(composition == nil)
             }
 
             TrimBar(
@@ -276,18 +264,11 @@ struct HighlightEditorView: View {
                 }
 
                 Button {
-                    Task { await autoFollow() }
-                } label: {
-                    Label("Auto-follow my player", systemImage: "scope")
-                }
-                .disabled(isTracking || clip == nil)
-
-                Button {
                     resetCrop()
                 } label: {
                     Label("Reset zoom to full frame", systemImage: "arrow.uturn.backward")
                 }
-                .disabled(cropWidth >= 0.999 && highlight.cropPath?.isStatic != false)
+                .disabled(cropWidth >= 0.999)
             }
 
             Section {
@@ -398,10 +379,8 @@ struct HighlightEditorView: View {
         seek(0)
     }
 
-    /// Back to the whole frame, and back to a fixed crop if auto-follow had taken over.
-    ///
-    /// Clearing to nil rather than a full-frame path matters: an absent crop lets the exporter
-    /// skip compositing altogether.
+    /// Back to the whole frame. Clearing to nil rather than a full-frame path matters: an absent
+    /// crop lets the exporter skip compositing altogether.
     private func resetCrop() {
         cropCenter = CGPoint(x: 0.5, y: 0.5)
         cropWidth = 1.0
@@ -437,45 +416,6 @@ struct HighlightEditorView: View {
     }
 
     // MARK: - Actions
-
-    /// Seeds the tracker from the current crop box and turns the result into a smoothed camera
-    /// move. Deliberately seeded from where the user has already framed rather than asking for a
-    /// separate tap — they've just told us where their son is.
-    private func autoFollow() async {
-        guard let clip, let first = clip.parts.first else { return }
-        isTracking = true
-        defer { isTracking = false }
-
-        // Vision's coordinate origin is bottom-left; the crop box is top-left.
-        let boxSize = 0.12
-        let seedBox = CGRect(
-            x: clamp(cropCenter.x - boxSize / 2),
-            y: clamp((1 - cropCenter.y) - boxSize / 2),
-            width: boxSize,
-            height: boxSize
-        )
-
-        do {
-            // The tracker reads the reassembled parts, whose timeline starts at the first part —
-            // the player's starts at the capture window. Shift in, then shift the results back.
-            _ = first
-            let tracker = SubjectTracker()
-            let observations = try await tracker.track(
-                parts: clip.parts,
-                initialBox: seedBox,
-                seedTime: clipOffset + playhead,
-                window: (clipOffset + trimStart)...(clipOffset + trimEnd)
-            )
-            let path = CropPath.smoothed(
-                observations: observations.map { ($0.time - clipOffset - trimStart, $0.center) },
-                widthFraction: cropWidth
-            )
-            highlight.cropPath = path
-            status = "Following your player across \(observations.count) frames — the green box shows the move. Drag the box to go back to a fixed crop."
-        } catch {
-            errorMessage = error.localizedDescription
-        }
-    }
 
     private func export() async {
         isExporting = true

@@ -4,7 +4,7 @@ import SwiftUI
 /// request arrives with context — and reachable again from About.
 ///
 /// This also does quiet double duty for App Review: a reviewer at a desk who taps through these
-/// four screens knows to press record, wait, tap, stop, and open Clips — which is otherwise easy
+/// four screens knows to open the eye, wait, tap, close it, and open Clips — which is otherwise easy
 /// to miss in an app whose main screen is just a camera.
 struct OnboardingView: View {
     @Environment(\.dismiss) private var dismiss
@@ -19,9 +19,9 @@ struct OnboardingView: View {
     private let pages: [Page] = [
         Page(
             symbol: "arrow.counterclockwise.circle.fill",
-            title: "It's always recording. You just say when.",
+            title: "It watches. You just say when.",
             body: """
-            Press record at kickoff and forget about it. When something good happens, tap anywhere \
+            Tap the eye at kickoff and forget about it. When something good happens, tap anywhere \
             on the screen — the last 25 seconds, plus a few after, become a clip. No filming the \
             whole game. Nothing to scrub through later.
             """
@@ -32,7 +32,7 @@ struct OnboardingView: View {
             body: """
             It records in 4K, so you can crop in afterwards with no loss of quality. On the \
             sideline, just keep your player somewhere in the frame — the yellow brackets show how \
-            much room you've got. Far from the action? The zoom buttons above the record button \
+            much room you've got. Far from the action? The zoom buttons above the eye \
             use your phone's real lenses.
             """
         ),
