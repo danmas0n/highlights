@@ -185,3 +185,10 @@ Or filter by `subsystem == "me.jpsj.highlights"` in Console.app.
 - Filmstrip thumbnails along the trim bar
 - Slow-motion beat on the moment of contact
 - Sharing beyond saving to Photos
+
+## License
+
+[PolyForm Noncommercial 1.0.0](LICENSE.md). Read it, learn from it, run it for your own kid's
+games, fork it for a hobby project — all fine. Selling it, or building a commercial product or
+service on it, isn't, unless you're JPSJ Consulting LLC. This is source-available rather than
+open source in the OSI sense; the distinction is the noncommercial restriction.
