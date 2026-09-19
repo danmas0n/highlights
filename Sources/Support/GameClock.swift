@@ -60,7 +60,7 @@ final class GameClock {
         case 3: suffix = "rd"
         default: suffix = "th"
         }
-        return "\(period)\(suffix) half"
+        return "\(period)\(suffix) period"
     }
 
     private func persist() {

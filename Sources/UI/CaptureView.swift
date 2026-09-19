@@ -169,7 +169,7 @@ struct CaptureView: View {
         let f = DateFormatter(); f.timeStyle = .short; f.dateStyle = .none; return f
     }()
 
-    /// Wall-clock time, the half's elapsed time, and when the half started. Tap for halftime.
+    /// Wall-clock time, the period's elapsed time, and when it started. Tap between periods.
     private var clockCluster: some View {
         TimelineView(.periodic(from: .now, by: 1)) { context in
             Menu {
@@ -178,8 +178,8 @@ struct CaptureView: View {
                     UIImpactFeedbackGenerator(style: .medium).impactOccurred()
                 } label: {
                     Label(model.gameClock.isRunning
-                          ? "Start \(ordinal(model.gameClock.period + 1)) half"
-                          : "Start 1st half",
+                          ? "Start \(ordinal(model.gameClock.period + 1)) period"
+                          : "Start 1st period",
                           systemImage: "flag.checkered")
                 }
                 if model.gameClock.isRunning {
@@ -357,12 +357,13 @@ struct CaptureView: View {
     private func chromeButton(_ icon: String, _ label: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             VStack(spacing: 2) {
-                Image(systemName: icon).font(.body)
-                Text(label).font(.caption2)
+                Image(systemName: icon).font(isLandscape ? .body : .title3)
+                if isLandscape { Text(label).font(.caption2) }
             }
             .frame(minWidth: 44, minHeight: 44)
         }
         .buttonStyle(.plain)
+        .accessibilityLabel(label)
     }
 
     /// Near-black rather than fully black, and still tap-to-mark.

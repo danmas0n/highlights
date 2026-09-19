@@ -35,10 +35,10 @@ The app opens in **standby** — camera live so you can frame the shot, nothing 
 - **Tap anywhere** to mark a moment. A Bluetooth clicker that sends a keyboard key works too.
 - **Dim** (Settings) drops screen brightness to near zero a few seconds after the eye opens, still
   accepting taps.
-- **The game clock** (top left) shows the time of day, how far into the half you are, and when
-  the half kicked off. It starts itself the first time the eye opens and keeps running when the
-  eye closes — you stop watching when your kid subs off, but the half doesn't stop. Tap it at
-  halftime to start the next one.
+- **The game clock** (top left) shows the time of day, how far into the period you are, and when
+  it started. It starts itself the first time the eye opens and keeps running when the eye closes —
+  you stop watching when your kid subs off, but the period doesn't stop. Tap it between periods to
+  start the next one; it counts halves, quarters, or thirds equally well.
 - **Clips** lists what you marked. Open one to trim it, frame the crop, and save to Photos.
 
 ### Field notes
@@ -106,7 +106,7 @@ Sources/
     KeyCommandCatcher.swift        Bluetooth clickers that present as a keyboard
   Support/
     TipJar.swift                   StoreKit 2 consumables; gates nothing
-    GameClock.swift                Wall clock and half timer, independent of the eye
+    GameClock.swift                Wall clock and period timer, independent of the eye
   UI/
     OnboardingView.swift           First-run tour, reachable again from About
     AboutView.swift                Who made it and why, links, tip jar
