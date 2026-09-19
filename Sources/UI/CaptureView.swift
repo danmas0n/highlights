@@ -149,7 +149,11 @@ struct CaptureView: View {
                     Text("Tap the eye to start watching")
                         .font(.caption.weight(.medium))
                         .foregroundStyle(.secondary)
-                    if !isLandscape { zoomControl }
+                    // Portrait: zoom on its own row, tucked to the right, out of the way of the
+                    // hint and the eye. Landscape has the width to put it beside the eye instead.
+                    if !isLandscape {
+                        HStack { Spacer(); zoomControl }
+                    }
                     HStack(spacing: 0) {
                         HStack { navigationCluster; Spacer() }.frame(maxWidth: .infinity)
                         watchButton
@@ -222,19 +226,19 @@ struct CaptureView: View {
 
     // MARK: Status
 
+    /// Warnings, and — only while watching — how far back a tap can still reach. The clip count
+    /// lives on the Clips icon as a badge, and each tap already confirms itself with a flash.
     private var statusCluster: some View {
         VStack(alignment: .trailing, spacing: 6) {
-            HStack(spacing: 6) {
-                Circle()
-                    .fill(isRecording ? .red : .gray)
-                    .frame(width: 8, height: 8)
-                Text(isRecording
-                     ? "\(model.library.highlights.count) marked · \(Int(model.engine.availableHistory.seconds))s back"
-                     : "\(model.library.highlights.count) marked · \(model.engine.activeLens)")
-                    .font(.caption.weight(.semibold).monospacedDigit())
+            if isRecording {
+                HStack(spacing: 6) {
+                    Circle().fill(.red).frame(width: 8, height: 8)
+                    Text("\(Int(model.engine.availableHistory.seconds))s back")
+                        .font(.caption.weight(.semibold).monospacedDigit())
+                }
+                .padding(.horizontal, 10).padding(.vertical, 6)
+                .background(.ultraThinMaterial, in: Capsule())
             }
-            .padding(.horizontal, 10).padding(.vertical, 6)
-            .background(.ultraThinMaterial, in: Capsule())
 
             if model.engine.thermalState == .serious || model.engine.thermalState == .critical {
                 pill("Phone is hot", "thermometer.high", .orange)
@@ -262,6 +266,17 @@ struct CaptureView: View {
     private var navigationCluster: some View {
         HStack(spacing: 0) {
             chromeButton("photo.stack", "Clips") { showLibrary = true }
+                .overlay(alignment: .topTrailing) {
+                    let count = model.library.highlights.count
+                    if count > 0 {
+                        Text("\(count)")
+                            .font(.caption2.weight(.bold).monospacedDigit())
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 5).padding(.vertical, 1)
+                            .background(.red, in: Capsule())
+                            .offset(x: 4, y: isLandscape ? 2 : 4)
+                    }
+                }
             chromeButton("gearshape.fill", "Settings") { showSettings = true }
             chromeButton("info.circle", "About") { showAbout = true }
         }
@@ -308,6 +323,17 @@ struct CaptureView: View {
             }
             .padding(compact ? 4 : 5)
             .background(.ultraThinMaterial, in: Capsule())
+            // The lens name used to sit in the status pill permanently. It only matters when
+            // it's bad news: you picked a telephoto stop and iOS is digitally zooming the wide
+            // instead, which looks like zoom and isn't.
+            .overlay(alignment: .bottom) {
+                if model.settings.zoomFactor > 2.01, model.engine.activeLens != "telephoto" {
+                    Text("digital zoom")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.orange)
+                        .offset(y: 16)
+                }
+            }
         }
     }
 
