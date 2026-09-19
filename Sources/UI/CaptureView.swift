@@ -135,31 +135,27 @@ struct CaptureView: View {
             VStack { HStack { clockCluster; Spacer() }; Spacer() }
             VStack { HStack { Spacer(); statusCluster }; Spacer() }
 
-            if isRecording {
-                // Corners only: zoom small at bottom-left, the eye small at bottom-right, and
-                // the whole middle of the screen left to the game.
-                VStack { Spacer(); HStack { zoomControl; Spacer() } }
-                VStack { Spacer(); HStack { Spacer(); eyeCluster } }
-            } else {
-                // Idle: one bottom row. Three equal slots keep the eye dead centre regardless of
-                // what's beside it — the first cut put the navigation and the eye in the same
-                // corner and they collided in portrait.
-                VStack(spacing: 8) {
-                    Spacer()
-                    Text("Tap the eye to start watching")
-                        .font(.caption.weight(.medium))
-                        .foregroundStyle(.secondary)
-                    // Portrait: zoom on its own row, tucked to the right, out of the way of the
-                    // hint and the eye. Landscape has the width to put it beside the eye instead.
-                    if !isLandscape {
-                        HStack { Spacer(); zoomControl }
-                    }
-                    HStack(spacing: 0) {
-                        HStack { navigationCluster; Spacer() }.frame(maxWidth: .infinity)
-                        watchButton
-                        HStack { Spacer(); if isLandscape { zoomControl } }.frame(maxWidth: .infinity)
-                    }
-                }
+            // Zoom: always bottom-right, in every state and orientation. One place to look.
+            VStack { Spacer(); HStack { Spacer(); zoomControl } }
+
+            // The eye: always bottom-centre. In portrait while idle it sits one row up so the
+            // navigation and zoom can share the bottom row beneath it; otherwise it's on the row.
+            VStack(spacing: 6) {
+                Spacer()
+                Text(isRecording
+                     ? "tap anywhere to mark the last \(Int(model.settings.preRollSeconds))s"
+                     : "Tap the eye to start watching")
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+                watchButton
+            }
+            .padding(.bottom, (!isLandscape && !isRecording) ? 66 : 0)
+
+            // Navigation: bottom-left, and only between plays.
+            if !isRecording {
+                VStack { Spacer(); HStack { navigationCluster; Spacer() } }
             }
         }
         .padding(.horizontal, isLandscape ? 16 : 20)
@@ -286,15 +282,6 @@ struct CaptureView: View {
 
     // MARK: Eye
 
-    private var eyeCluster: some View {
-        VStack(spacing: 4) {
-            watchButton
-            Text("tap anywhere to mark")
-                .font(.caption2.weight(.medium))
-                .foregroundStyle(.secondary)
-        }
-    }
-
     /// Optical zoom, on the capture screen rather than buried in Settings.
     ///
     /// How far away you are is something you discover on arriving at the pitch, not something you
@@ -304,7 +291,7 @@ struct CaptureView: View {
     private var zoomControl: some View {
         if model.engine.zoomStops.count > 1 {
             let compact = isRecording
-            HStack(spacing: compact ? 4 : 6) {
+            HStack(spacing: compact ? 3 : 6) {
                 ForEach(model.engine.zoomStops, id: \.self) { stop in
                     let selected = abs(model.settings.zoomFactor - stop) < 0.01
                     Button {
@@ -315,13 +302,13 @@ struct CaptureView: View {
                         Text(stop < 1 ? String(format: "%.1f×", stop) : String(format: "%g×", stop))
                             .font((compact ? Font.caption2 : .footnote).weight(.bold).monospacedDigit())
                             .foregroundStyle(selected ? .black : .white)
-                            .frame(minWidth: compact ? 34 : 42, minHeight: compact ? 26 : 34)
+                            .frame(minWidth: compact ? 32 : 42, minHeight: compact ? 26 : 34)
                             .background(selected ? Color.yellow : Color.white.opacity(0.16), in: Capsule())
                     }
                     .buttonStyle(.plain)
                 }
             }
-            .padding(compact ? 4 : 5)
+            .padding(compact ? 3 : 5)
             .background(.ultraThinMaterial, in: Capsule())
             // The lens name used to sit in the status pill permanently. It only matters when
             // it's bad news: you picked a telephoto stop and iOS is digitally zooming the wide
