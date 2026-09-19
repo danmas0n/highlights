@@ -32,6 +32,7 @@ final class AppModel {
     let triggers = TriggerCoordinator()
     let extractor: HighlightExtractor
     let tipJar = TipJar()
+    let gameClock = GameClock()
 
     init() {
         let settings = CaptureSettings.load()

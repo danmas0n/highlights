@@ -6,6 +6,7 @@ import SwiftUI
 struct CaptureView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
 
     @State private var showLibrary = false
     @State private var showSettings = false
@@ -54,18 +55,10 @@ struct CaptureView: View {
 
             Color.white.opacity(flashOpacity).ignoresSafeArea().allowsHitTesting(false)
 
-            VStack(spacing: 10) {
-                topBar
-                Spacer()
-                hintText
-                zoomControl
-                bottomBar
-            }
-            .padding(.horizontal, 24)
-            .padding(.vertical, 16)
-            .opacity(isDimmed ? 0 : 1)
-            // Invisible chrome must not keep swallowing taps that are meant to mark a moment.
-            .allowsHitTesting(!isDimmed)
+            chrome
+                .opacity(isDimmed ? 0 : 1)
+                // Invisible chrome must not keep swallowing taps that are meant to mark a moment.
+                .allowsHitTesting(!isDimmed)
 
             if let markBanner {
                 Text(markBanner)
@@ -116,114 +109,187 @@ struct CaptureView: View {
         // Dimming is automatic rather than a button: on a tripod you want it to just happen
         // once recording is underway, and to lift the moment you stop.
         .onChange(of: isRecording) { _, recording in
-            if recording { scheduleDim(after: 8) } else { cancelDim(); if isDimmed { wake() } }
+            if recording {
+                model.gameClock.startIfIdle()
+                scheduleDim(after: 8)
+            } else {
+                cancelDim()
+                if isDimmed { wake() }
+            }
         }
         .persistentSystemOverlays(.hidden)
     }
 
     // MARK: - Chrome
 
-    private var topBar: some View {
-        HStack(alignment: .top) {
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 8) {
-                    Circle()
-                        .fill(isRecording ? .red : .gray)
-                        .frame(width: 10, height: 10)
-                    Text(timecode(model.engine.elapsed.seconds))
-                        .font(.system(.title3, design: .monospaced).weight(.semibold))
-                }
-                Text(isRecording
-                     ? "\(Int(model.engine.availableHistory.seconds))s of history · \(model.engine.activeLens)"
-                     : "Not watching · \(model.engine.activeLens)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
+    /// Landscape on a phone: the size class the sideline actually uses.
+    private var isLandscape: Bool { verticalSizeClass == .compact }
 
-            Spacer()
+    /// While watching, the chrome shrinks into the corners and the middle of the screen — the
+    /// part with the game in it — is left alone. Full-width bars and a hint line sitting exactly
+    /// where you're trying to see the ball were the first thing an actual sideline complained
+    /// about. Anything you'd only do between plays (Clips, Settings, About) is hidden until the
+    /// eye closes; zoom stays, small, because you might want it between plays without stopping.
+    private var chrome: some View {
+        ZStack {
+            VStack { HStack { clockCluster; Spacer() }; Spacer() }
+            VStack { HStack { Spacer(); statusCluster }; Spacer() }
 
-            VStack(spacing: 4) {
-                if model.engine.thermalState == .serious || model.engine.thermalState == .critical {
-                    Label("Phone is hot", systemImage: "thermometer.high")
-                        .font(.caption.weight(.semibold))
-                        .padding(.horizontal, 10).padding(.vertical, 6)
-                        .background(.orange.opacity(0.85), in: Capsule())
+            if isRecording {
+                // Corners only: zoom small at bottom-left, the eye small at bottom-right, and
+                // the whole middle of the screen left to the game.
+                VStack { Spacer(); HStack { zoomControl; Spacer() } }
+                VStack { Spacer(); HStack { Spacer(); eyeCluster } }
+            } else {
+                // Idle: one bottom row. Three equal slots keep the eye dead centre regardless of
+                // what's beside it — the first cut put the navigation and the eye in the same
+                // corner and they collided in portrait.
+                VStack(spacing: 8) {
+                    Spacer()
+                    Text("Tap the eye to start watching")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(.secondary)
+                    if !isLandscape { zoomControl }
+                    HStack(spacing: 0) {
+                        HStack { navigationCluster; Spacer() }.frame(maxWidth: .infinity)
+                        watchButton
+                        HStack { Spacer(); if isLandscape { zoomControl } }.frame(maxWidth: .infinity)
+                    }
                 }
-                if model.engine.isInterrupted {
-                    Label("Interrupted", systemImage: "exclamationmark.triangle.fill")
-                        .font(.caption.weight(.semibold))
-                        .padding(.horizontal, 10).padding(.vertical, 6)
-                        .background(.red.opacity(0.85), in: Capsule())
-                } else if model.engine.isStalled {
-                    Label("No video", systemImage: "eye.slash.fill")
-                        .font(.caption.weight(.semibold))
-                        .padding(.horizontal, 10).padding(.vertical, 6)
-                        .background(.red.opacity(0.85), in: Capsule())
-                }
-                if let note = model.engine.thermalDowngradeNote {
-                    Text(note)
-                        .font(.caption2)
-                        .foregroundStyle(.orange)
-                }
-            }
-
-            Spacer()
-
-            VStack(alignment: .trailing, spacing: 4) {
-                Text("\(model.library.highlights.count) marked")
-                    .font(.system(.title3, design: .rounded).weight(.semibold))
-                // ByteCountFormatter renders 0 as "Zero KB", which reads like a bug.
-                Text(model.engine.bytesOnDisk > 0
-                     ? ByteCountFormatter.string(fromByteCount: model.engine.bytesOnDisk, countStyle: .file)
-                     : "—")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
             }
         }
-        .padding(.horizontal, 14).padding(.vertical, 10)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
+        .padding(.horizontal, isLandscape ? 16 : 20)
+        .padding(.vertical, isLandscape ? 8 : 14)
+        .animation(.easeInOut(duration: 0.2), value: isRecording)
     }
 
-    private var hintText: some View {
-        Text(isRecording
-             ? "Tap anywhere to mark the last \(Int(model.settings.preRollSeconds))s"
-             : "Tap the eye to start watching")
-            .font(.footnote.weight(.medium))
-            .foregroundStyle(.secondary)
-            .lineLimit(1)
-            .minimumScaleFactor(0.7)
-            .padding(.horizontal, 12).padding(.vertical, 6)
+    // MARK: Clock
+
+    private static let wallClock: DateFormatter = {
+        let f = DateFormatter(); f.timeStyle = .short; f.dateStyle = .none; return f
+    }()
+
+    /// Wall-clock time, the half's elapsed time, and when the half started. Tap for halftime.
+    private var clockCluster: some View {
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+            Menu {
+                Button {
+                    model.gameClock.startNextPeriod()
+                    UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                } label: {
+                    Label(model.gameClock.isRunning
+                          ? "Start \(ordinal(model.gameClock.period + 1)) half"
+                          : "Start 1st half",
+                          systemImage: "flag.checkered")
+                }
+                if model.gameClock.isRunning {
+                    Button(role: .destructive) {
+                        model.gameClock.reset()
+                    } label: {
+                        Label("Reset game clock", systemImage: "arrow.counterclockwise")
+                    }
+                }
+            } label: {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(Self.wallClock.string(from: context.date))
+                        .font(.system(isRecording ? .headline : .title2, design: .rounded).weight(.bold).monospacedDigit())
+                    if model.gameClock.isRunning, let started = model.gameClock.periodStartedAt {
+                        Text("\(model.gameClock.periodLabel) \(timecode(model.gameClock.elapsed))")
+                            .font(isRecording ? .caption.weight(.semibold) : .subheadline.weight(.semibold))
+                            .monospacedDigit()
+                        if !isRecording {
+                            Text("kicked off \(Self.wallClock.string(from: started))")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                    } else if !isRecording {
+                        Text("Game clock starts with the eye")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .padding(.horizontal, 12).padding(.vertical, 8)
+                .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12))
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.white)
+        }
+    }
+
+    private func ordinal(_ n: Int) -> String {
+        switch n { case 1: "1st"; case 2: "2nd"; case 3: "3rd"; default: "\(n)th" }
+    }
+
+    // MARK: Status
+
+    private var statusCluster: some View {
+        VStack(alignment: .trailing, spacing: 6) {
+            HStack(spacing: 6) {
+                Circle()
+                    .fill(isRecording ? .red : .gray)
+                    .frame(width: 8, height: 8)
+                Text(isRecording
+                     ? "\(model.library.highlights.count) marked · \(Int(model.engine.availableHistory.seconds))s back"
+                     : "\(model.library.highlights.count) marked · \(model.engine.activeLens)")
+                    .font(.caption.weight(.semibold).monospacedDigit())
+            }
+            .padding(.horizontal, 10).padding(.vertical, 6)
             .background(.ultraThinMaterial, in: Capsule())
+
+            if model.engine.thermalState == .serious || model.engine.thermalState == .critical {
+                pill("Phone is hot", "thermometer.high", .orange)
+            }
+            if model.engine.isInterrupted {
+                pill("Interrupted", "exclamationmark.triangle.fill", .red)
+            } else if model.engine.isStalled {
+                pill("No video", "eye.slash.fill", .red)
+            }
+            if let note = model.engine.thermalDowngradeNote {
+                Text(note).font(.caption2).foregroundStyle(.orange)
+            }
+        }
     }
 
-    /// Four controls, evenly spaced. Everything else got its own row — this used to hold the zoom
-    /// pills and a hint line too, which in portrait squeezed them to nothing.
-    private var bottomBar: some View {
-        HStack(spacing: 12) {
+    private func pill(_ text: String, _ symbol: String, _ color: Color) -> some View {
+        Label(text, systemImage: symbol)
+            .font(.caption.weight(.semibold))
+            .padding(.horizontal, 10).padding(.vertical, 6)
+            .background(color.opacity(0.85), in: Capsule())
+    }
+
+    // MARK: Navigation
+
+    private var navigationCluster: some View {
+        HStack(spacing: 0) {
             chromeButton("photo.stack", "Clips") { showLibrary = true }
             chromeButton("gearshape.fill", "Settings") { showSettings = true }
-
-            Spacer()
-
-            watchButton
-
-            Spacer()
-
             chromeButton("info.circle", "About") { showAbout = true }
         }
-        .padding(.horizontal, 14).padding(.vertical, 10)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 16))
+        .padding(.horizontal, 4).padding(.vertical, 2)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 14))
+    }
+
+    // MARK: Eye
+
+    private var eyeCluster: some View {
+        VStack(spacing: 4) {
+            watchButton
+            Text("tap anywhere to mark")
+                .font(.caption2.weight(.medium))
+                .foregroundStyle(.secondary)
+        }
     }
 
     /// Optical zoom, on the capture screen rather than buried in Settings.
     ///
     /// How far away you are is something you discover on arriving at the pitch, not something you
     /// configure at home — and it changes between a full-size field and a small-sided one. Safe to
-    /// change mid-recording: zoom doesn't alter the recorded dimensions.
+    /// change mid-recording: zoom doesn't alter the recorded dimensions. Small while watching.
     @ViewBuilder
     private var zoomControl: some View {
         if model.engine.zoomStops.count > 1 {
-            HStack(spacing: 8) {
+            let compact = isRecording
+            HStack(spacing: compact ? 4 : 6) {
                 ForEach(model.engine.zoomStops, id: \.self) { stop in
                     let selected = abs(model.settings.zoomFactor - stop) < 0.01
                     Button {
@@ -232,15 +298,15 @@ struct CaptureView: View {
                         UIImpactFeedbackGenerator(style: .light).impactOccurred()
                     } label: {
                         Text(stop < 1 ? String(format: "%.1f×", stop) : String(format: "%g×", stop))
-                            .font(.subheadline.weight(.bold).monospacedDigit())
+                            .font((compact ? Font.caption2 : .footnote).weight(.bold).monospacedDigit())
                             .foregroundStyle(selected ? .black : .white)
-                            .frame(minWidth: 46, minHeight: 38)
+                            .frame(minWidth: compact ? 34 : 42, minHeight: compact ? 26 : 34)
                             .background(selected ? Color.yellow : Color.white.opacity(0.16), in: Capsule())
                     }
                     .buttonStyle(.plain)
                 }
             }
-            .padding(6)
+            .padding(compact ? 4 : 5)
             .background(.ultraThinMaterial, in: Capsule())
         }
     }
@@ -263,16 +329,17 @@ struct CaptureView: View {
                 UIImpactFeedbackGenerator(style: .medium).impactOccurred()
             }
         } label: {
+            let size: CGFloat = isRecording ? 44 : 58
             VStack(spacing: 4) {
                 ZStack {
                     Circle()
                         .fill(isRecording ? Color.red : Color.white.opacity(0.14))
-                        .frame(width: 58, height: 58)
+                        .frame(width: size, height: size)
                     Circle()
                         .strokeBorder(isRecording ? Color.red.opacity(0.5) : Color.white.opacity(0.9), lineWidth: 3)
-                        .frame(width: 58, height: 58)
+                        .frame(width: size, height: size)
                     Image(systemName: isRecording ? "eye.fill" : "eye.slash")
-                        .font(.system(size: 24, weight: .semibold))
+                        .font(.system(size: isRecording ? 18 : 24, weight: .semibold))
                         .foregroundStyle(.white)
                         .contentTransition(.symbolEffect(.replace))
                 }
@@ -290,10 +357,10 @@ struct CaptureView: View {
     private func chromeButton(_ icon: String, _ label: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             VStack(spacing: 2) {
-                Image(systemName: icon).font(.title3)
+                Image(systemName: icon).font(.body)
                 Text(label).font(.caption2)
             }
-            .frame(minWidth: 56)
+            .frame(minWidth: 44, minHeight: 44)
         }
         .buttonStyle(.plain)
     }
@@ -418,6 +485,8 @@ struct CaptureView: View {
 
     private func timecode(_ seconds: Double) -> String {
         let total = Int(max(0, seconds))
-        return String(format: "%d:%02d:%02d", total / 3600, (total % 3600) / 60, total % 60)
+        return total >= 3600
+            ? String(format: "%d:%02d:%02d", total / 3600, (total % 3600) / 60, total % 60)
+            : String(format: "%d:%02d", total / 60, total % 60)
     }
 }
