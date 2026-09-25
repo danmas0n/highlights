@@ -11,6 +11,10 @@ Highlights does not collect, transmit, or share any personal information.
 Highlights records video and audio from your device's camera and microphone so it can save the
 clips you mark. That footage is written to the app's own storage on your device.
 
+Sound is optional. The microphone button on the capture screen turns it off — the microphone is
+disconnected, not just silenced — and each clip has an "Include sound" switch so it can be saved
+without audio. The app also works if microphone access is never granted.
+
 ## Where it goes
 
 Nowhere. There is no account, no server, no analytics, and no third-party SDK of any kind. The app

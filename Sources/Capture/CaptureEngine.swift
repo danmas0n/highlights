@@ -46,6 +46,10 @@ final class CaptureEngine {
     /// thing from a minute ago?"
     private(set) var availableHistory: CMTime = .zero
     private(set) var isInterrupted = false
+    /// Microphone off. Kept outside `CaptureSettings` so it survives relaunch without touching
+    /// the settings blob, and switchable mid-watch: the microphone is physically detached (the
+    /// orange indicator goes out), and the recorder keeps the audio timeline in step with silence.
+    private(set) var isAudioMuted = UserDefaults.standard.bool(forKey: "capture.audioMuted")
     /// Session claims to be running but no video has arrived for a while. Distinct from `failed`:
     /// it may recover on its own, and we'd rather warn loudly than tear down a live recording.
     private(set) var isStalled = false
@@ -95,7 +99,8 @@ final class CaptureEngine {
         // Placeholder until a session begins; every real recording gets its own recorder below.
         self.recorder = SegmentRecorder(
             settings: settings, queue: queue,
-            audioURL: FileManager.default.temporaryDirectory.appendingPathComponent("unused-audio.mp4")
+            audioURL: FileManager.default.temporaryDirectory.appendingPathComponent("unused-audio.mp4"),
+            audioMuted: true
         )
         self.store = SegmentStore(
             directory: URL.applicationSupportDirectory.appendingPathComponent("segments", isDirectory: true),
@@ -121,8 +126,16 @@ final class CaptureEngine {
         async let video = AVCaptureDevice.requestAccess(for: .video)
         async let audio = AVCaptureDevice.requestAccess(for: .audio)
         let hasVideo = await video
-        let hasAudio = await audio
-        return hasVideo && hasAudio
+        _ = await audio
+        // Only the camera is required. Saying no to the microphone is a reasonable choice on a
+        // sideline full of other people's conversations; it just means silent clips.
+        return hasVideo
+    }
+
+    /// The microphone was refused in iOS Settings, so unmuting can't do anything from here.
+    var microphoneDenied: Bool {
+        let status = AVCaptureDevice.authorizationStatus(for: .audio)
+        return status == .denied || status == .restricted
     }
 
     // MARK: - Camera lifecycle
@@ -144,9 +157,11 @@ final class CaptureEngine {
             needsPermissionInSettings =
                 AVCaptureDevice.authorizationStatus(for: .video) != .notDetermined
             captureLog.error("camera: permission denied")
-            state = .failed("Highlights needs camera and microphone access to record.")
+            state = .failed("Highlights needs camera access to record.")
             return
         }
+
+        if microphoneDenied, !isAudioMuted { setAudioMuted(true) }
 
         do {
             captureLog.info("camera: configuring session")
@@ -183,7 +198,8 @@ final class CaptureEngine {
             // keep arriving somewhere valid across the handoff.
             let recorder = SegmentRecorder(
                 settings: settings, queue: writerQueue,
-                audioURL: await store.audioURL(for: sessionID)
+                audioURL: await store.audioURL(for: sessionID),
+                audioMuted: isAudioMuted
             )
             recorder.delegate = self
             self.recorder = recorder
@@ -191,7 +207,8 @@ final class CaptureEngine {
             try await recorder.prepareOnQueue()
             // Attach *after* the writer is ready so the first frames delivered aren't discarded.
             await sessionController.setRecordingActive(
-                true, sampleBufferDelegate: outputProxy, recorderQueue: writerQueue
+                true, microphone: !isAudioMuted,
+                sampleBufferDelegate: outputProxy, recorderQueue: writerQueue
             )
         } catch {
             captureLog.error("record failed: \(error.localizedDescription, privacy: .public)")
@@ -219,13 +236,24 @@ final class CaptureEngine {
         let queue = writerQueue
         outputTeardown = Task {
             await controller.setRecordingActive(
-                false, sampleBufferDelegate: proxy, recorderQueue: queue
+                false, microphone: false, sampleBufferDelegate: proxy, recorderQueue: queue
             )
         }
         recorder.finish {}
         Task { await store.endSession() }
         state = .standby
         captureLog.info("recording: stopped at \(self.elapsed.seconds, privacy: .public)s")
+    }
+
+    /// Mutes or unmutes the microphone, live if watching.
+    func setAudioMuted(_ muted: Bool) {
+        guard muted != isAudioMuted, muted || !microphoneDenied else { return }
+        isAudioMuted = muted
+        UserDefaults.standard.set(muted, forKey: "capture.audioMuted")
+        // Recorder first, so nothing more is written even before the microphone is detached.
+        recorder.setAudioMuted(muted)
+        if state == .recording { sessionController.setMicrophoneAttached(!muted) }
+        captureReport("audio: \(muted ? "muted" : "unmuted")")
     }
 
     /// `point` is in the camera's normalized coordinate space.

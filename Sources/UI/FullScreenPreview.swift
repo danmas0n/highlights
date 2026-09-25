@@ -25,6 +25,7 @@ struct FullScreenPreview: View {
     @Binding var cropWidth: Double
 
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
 
     @State private var showingCrop = true
     /// Size the video actually occupies on screen, so drags map 1:1 to what you can see.
@@ -73,48 +74,77 @@ struct FullScreenPreview: View {
         .onAppear(perform: observeTime)
         .onDisappear(perform: stopObserving)
         .onChange(of: showingCrop) { _, _ in Task { await applyCropComposition() } }
+        // The editor opens this when the phone turns sideways, so turning it back upright is
+        // the matching way out — the same as Photos.
+        .onChange(of: verticalSizeClass) { old, new in
+            if old == .compact, new == .regular { dismiss() }
+        }
     }
 
     // MARK: - Chrome
 
+    /// One row in landscape. In portrait there isn't the width for Done, the mode picker, and
+    /// the zoom badge side by side — they were being squeezed off both edges — so the picker
+    /// drops to its own row beneath.
+    @ViewBuilder
     private var topBar: some View {
-        HStack {
-            Button {
-                dismiss()
-            } label: {
-                Label("Done", systemImage: "chevron.down")
-                    .font(.callout.weight(.semibold))
-                    .padding(.horizontal, 14).padding(.vertical, 9)
-                    .background(.ultraThinMaterial, in: Capsule())
+        if verticalSizeClass == .compact {
+            HStack {
+                doneButton
+                Spacer()
+                modePicker.frame(width: 240)
+                Spacer()
+                zoomBadge
             }
-            .buttonStyle(.plain)
-
-            Spacer()
-
-            Picker("", selection: $showingCrop) {
-                Text("Full frame").tag(false)
-                Text("Export crop").tag(true)
+        } else {
+            VStack(spacing: 10) {
+                HStack {
+                    doneButton
+                    Spacer()
+                    zoomBadge
+                }
+                modePicker
             }
-            .pickerStyle(.segmented)
-            .frame(width: 240)
-
-            Spacer()
-
-            Button {
-                cropCenter = CGPoint(x: 0.5, y: 0.5)
-                cropWidth = 1.0
-                pinchScale = 1
-                dragAnchor = nil
-                Task { await applyCropComposition() }
-            } label: {
-                Text(String(format: "%.1f×", 1.0 / cropWidth))
-                    .font(.callout.monospacedDigit().weight(.semibold))
-                    .padding(.horizontal, 14).padding(.vertical, 9)
-                    .background(.ultraThinMaterial, in: Capsule())
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Reset zoom to full frame")
         }
+    }
+
+    private var doneButton: some View {
+        Button {
+            dismiss()
+        } label: {
+            Label("Done", systemImage: "chevron.down")
+                .font(.callout.weight(.semibold))
+                .padding(.horizontal, 14).padding(.vertical, 9)
+                .background(.ultraThinMaterial, in: Capsule())
+        }
+        .buttonStyle(.plain)
+        .fixedSize()
+    }
+
+    private var modePicker: some View {
+        Picker("", selection: $showingCrop) {
+            Text("Full frame").tag(false)
+            Text("Export crop").tag(true)
+        }
+        .pickerStyle(.segmented)
+    }
+
+    private var zoomBadge: some View {
+        Button {
+            cropCenter = CGPoint(x: 0.5, y: 0.5)
+            cropWidth = 1.0
+            pinchScale = 1
+            dragAnchor = nil
+            Task { await applyCropComposition() }
+        } label: {
+            Text(String(format: "%.1f×", 1.0 / cropWidth))
+                .font(.callout.monospacedDigit().weight(.semibold))
+                .padding(.horizontal, 14).padding(.vertical, 9)
+                .background(.ultraThinMaterial, in: Capsule())
+        }
+        .buttonStyle(.plain)
+        .fixedSize()
+        .accessibilityLabel("Reset zoom to full frame")
     }
 
     private var transport: some View {

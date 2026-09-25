@@ -6,6 +6,7 @@ import SwiftUI
 struct HighlightEditorView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
 
     @State private var highlight: Highlight
 
@@ -65,6 +66,15 @@ struct HighlightEditorView: View {
                 }
             }
             .task { await loadPreview() }
+            // Turning the phone sideways here only ever means one thing: "let me see it bigger".
+            .onChange(of: verticalSizeClass) { _, sizeClass in
+                if sizeClass == .compact, composition != nil, !showFullScreen {
+                    showFullScreen = true
+                }
+            }
+            .onChange(of: highlight.audioRemoved) { _, _ in
+                player?.isMuted = !highlight.includesAudio
+            }
             // Teardown must hang off `onDisappear`, not the Close button. A sheet is normally
             // dismissed by swiping it down, which never ran `close()` — leaving an AVPlayer
             // looping a 4K composition forever, a periodic time observer firing against it, and
@@ -272,6 +282,20 @@ struct HighlightEditorView: View {
             }
 
             Section {
+                Toggle(isOn: Binding(
+                    get: { highlight.includesAudio },
+                    set: { highlight.audioRemoved = $0 ? nil : true }
+                )) {
+                    Label("Include sound", systemImage: highlight.includesAudio
+                          ? "speaker.wave.2.fill" : "speaker.slash.fill")
+                }
+            } footer: {
+                Text(highlight.includesAudio
+                     ? "Turn off to save this clip silently — nothing said on the sideline goes with it."
+                     : "This clip will be saved with no sound at all.")
+            }
+
+            Section {
                 TextField("Title (optional)", text: $highlight.title)
                 if highlight.isExported {
                     Label("Saved to Photos", systemImage: "checkmark.circle.fill")
@@ -338,6 +362,7 @@ struct HighlightEditorView: View {
             let item = AVPlayerItem(asset: composition)
             item.forwardPlaybackEndTime = CMTime(seconds: trimEnd, preferredTimescale: 600)
             let player = AVPlayer(playerItem: item)
+            player.isMuted = !highlight.includesAudio
             self.player = player
 
             // 10 Hz: enough for the tracked crop box to move smoothly, well short of the 30 Hz

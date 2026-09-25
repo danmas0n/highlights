@@ -23,12 +23,15 @@ enum ClipComposer {
     /// Builds a composition trimmed to `window`, expressed in the recording session's timeline.
     static func makeComposition(
         clip: SegmentStore.ReassembledClip,
-        window: CMTimeRange
+        window: CMTimeRange,
+        includeAudio: Bool = true
     ) async throws -> sending AVMutableComposition {
         let stitched = try await stitch(parts: clip.parts)
         let transform = stitched.tracks(withMediaType: .video).first?.preferredTransform
         let stitchedDuration = stitched.duration
-        try await addAudio(to: stitched, from: clip, coveringDuration: stitchedDuration)
+        if includeAudio {
+            try await addAudio(to: stitched, from: clip, coveringDuration: stitchedDuration)
+        }
 
         // Map the requested session-timeline window onto the stitched timeline, then clamp: the
         // post-roll may still have been encoding when the clip was opened.

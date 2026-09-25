@@ -222,18 +222,23 @@ struct CaptureView: View {
 
     // MARK: Status
 
-    /// Warnings, and — only while watching — how far back a tap can still reach. The clip count
-    /// lives on the Clips icon as a badge, and each tap already confirms itself with a flash.
+    /// The microphone switch, how long you've been watching, and warnings. The clip count lives
+    /// on the Clips icon as a badge, and each tap already confirms itself with a flash.
     private var statusCluster: some View {
         VStack(alignment: .trailing, spacing: 6) {
-            if isRecording {
-                HStack(spacing: 6) {
-                    Circle().fill(.red).frame(width: 8, height: 8)
-                    Text("\(Int(model.engine.availableHistory.seconds))s back")
-                        .font(.caption.weight(.semibold).monospacedDigit())
+            HStack(spacing: 8) {
+                if isRecording {
+                    // Time watching, not how far back a tap reaches: that figure stops at the
+                    // retention limit, which read as a timer that had frozen.
+                    HStack(spacing: 6) {
+                        Circle().fill(.red).frame(width: 8, height: 8)
+                        Text(timecode(model.engine.elapsed.seconds))
+                            .font(.caption.weight(.semibold).monospacedDigit())
+                    }
+                    .padding(.horizontal, 10).padding(.vertical, 6)
+                    .background(.ultraThinMaterial, in: Capsule())
                 }
-                .padding(.horizontal, 10).padding(.vertical, 6)
-                .background(.ultraThinMaterial, in: Capsule())
+                muteButton
             }
 
             if model.engine.thermalState == .serious || model.engine.thermalState == .critical {
@@ -248,6 +253,36 @@ struct CaptureView: View {
                 Text(note).font(.caption2).foregroundStyle(.orange)
             }
         }
+    }
+
+    /// Sideline audio is mostly other parents talking, and people reasonably ask whether they're
+    /// being recorded. One tap turns the microphone off — actually off, indicator and all — and
+    /// the choice sticks until you turn it back on.
+    private var muteButton: some View {
+        let muted = model.engine.isAudioMuted
+        return Button {
+            if muted, model.engine.microphoneDenied {
+                // Say why nothing happened, rather than a button that silently won't turn on.
+                withAnimation(.spring(duration: 0.25)) { markBanner = "Mic is off in iOS Settings" }
+                Task {
+                    try? await Task.sleep(for: .seconds(1.8))
+                    withAnimation { markBanner = nil }
+                }
+                return
+            }
+            model.engine.setAudioMuted(!muted)
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        } label: {
+            Image(systemName: muted ? "mic.slash.fill" : "mic.fill")
+                .font(.system(size: isRecording ? 14 : 17, weight: .semibold))
+                .foregroundStyle(muted ? .black : .white)
+                .frame(width: isRecording ? 32 : 40, height: isRecording ? 32 : 40)
+                .background(muted ? AnyShapeStyle(Color.yellow) : AnyShapeStyle(.ultraThinMaterial),
+                            in: Circle())
+                .contentTransition(.symbolEffect(.replace))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(muted ? "Microphone off. Turn on sound" : "Microphone on. Mute sound")
     }
 
     private func pill(_ text: String, _ symbol: String, _ color: Color) -> some View {

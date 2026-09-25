@@ -25,7 +25,7 @@
 	<key>NSCameraUsageDescription</key>
 	<string>Highlights uses the camera to record the game so you can save the moments you mark. Nothing leaves your phone.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Highlights records audio alongside video so your saved clips have crowd and sideline sound.</string>
+	<string>Highlights records audio alongside video so your saved clips have crowd and sideline sound. You can mute it anytime, or say no and get silent clips.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>Highlights saves the clips you export to your photo library.</string>
 	<key>UILaunchScreen</key>

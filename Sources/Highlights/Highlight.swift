@@ -27,6 +27,10 @@ struct Highlight: Identifiable, Codable, Equatable {
     var trimStart: Double = 0
     var trimEnd: Double?
 
+    /// Export without sound. Optional so clips saved before this existed still decode.
+    var audioRemoved: Bool?
+    var includesAudio: Bool { audioRemoved != true }
+
     init(
         id: UUID = UUID(),
         sessionID: UUID,

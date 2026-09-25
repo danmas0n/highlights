@@ -123,7 +123,7 @@ actor HighlightExtractor {
         let clip = try await materialise(highlight)
 
         let composition = try await ClipComposer.makeComposition(
-            clip: clip, window: highlight.trimmedRange
+            clip: clip, window: highlight.trimmedRange, includeAudio: highlight.includesAudio
         )
         guard let videoTrack = composition.tracks(withMediaType: .video).first else {
             throw ExtractError.noVideoTrack

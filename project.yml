@@ -40,7 +40,8 @@ targets:
           moments you mark. Nothing leaves your phone.
         NSMicrophoneUsageDescription: >-
           Highlights records audio alongside video so your saved clips have
-          crowd and sideline sound.
+          crowd and sideline sound. You can mute it anytime, or say no and
+          get silent clips.
         NSPhotoLibraryAddUsageDescription: >-
           Highlights saves the clips you export to your photo library.
         UISupportedInterfaceOrientations:

@@ -70,6 +70,7 @@ final class CaptureSessionController: @unchecked Sendable {
     /// rather than continuously.
     func setRecordingActive(
         _ active: Bool,
+        microphone: Bool,
         sampleBufferDelegate: SampleBufferProxy,
         recorderQueue: DispatchQueue
     ) async {
@@ -84,17 +85,7 @@ final class CaptureSessionController: @unchecked Sendable {
                 if active {
                     guard videoDataOutput == nil else { return }
 
-                    if let device = AVCaptureDevice.default(for: .audio) {
-                        if let input = try? AVCaptureDeviceInput(device: device),
-                           session.canAddInput(input) {
-                            session.addInput(input)
-                            audioInput = input
-                        } else {
-                            captureReport("audio: microphone input REFUSED by session")
-                        }
-                    } else {
-                        captureReport("audio: no microphone device")
-                    }
+                    if microphone { attachMicrophone() }
 
                     let videoOut = AVCaptureVideoDataOutput()
                     videoOut.videoSettings = [
@@ -151,6 +142,36 @@ final class CaptureSessionController: @unchecked Sendable {
                 }
                 captureLog.info("recording outputs \(active ? "attached" : "detached", privacy: .public)")
             }
+        }
+    }
+
+    /// Adds or removes the microphone input on a live recording, for mute.
+    func setMicrophoneAttached(_ attached: Bool) {
+        queue.async { [self] in
+            guard videoDataOutput != nil else { return }
+            session.beginConfiguration()
+            defer { session.commitConfiguration() }
+            if attached {
+                attachMicrophone()
+            } else if let input = audioInput {
+                session.removeInput(input)
+                audioInput = nil
+            }
+        }
+    }
+
+    /// Must run on `queue` inside a configuration block.
+    private func attachMicrophone() {
+        guard audioInput == nil else { return }
+        guard let device = AVCaptureDevice.default(for: .audio) else {
+            captureReport("audio: no microphone device")
+            return
+        }
+        if let input = try? AVCaptureDeviceInput(device: device), session.canAddInput(input) {
+            session.addInput(input)
+            audioInput = input
+        } else {
+            captureReport("audio: microphone input REFUSED by session")
         }
     }
 

@@ -75,11 +75,30 @@ final class SegmentRecorder: NSObject, @unchecked Sendable {
     private let audioURL: URL
     private var audioWriter: AVAssetWriter?
 
-    init(settings: CaptureSettings, queue: DispatchQueue, audioURL: URL) {
+    /// Muting detaches the microphone, but the audio file has to keep time while it's off.
+    ///
+    /// AVAssetWriter squeezes a gap in the middle of an audio track out entirely, so everything
+    /// recorded after an unmute would play early against the video by however long the mute
+    /// lasted. (A gap at the very *start* is kept, as an empty edit — so muting before the first
+    /// buffer ever arrives needs nothing.) While muted we write digital silence up to just behind
+    /// the video, and close the last sliver exactly when the microphone comes back.
+    private var audioMuted = false
+    /// End of the last audio written, in source time. Nil until the first buffer.
+    private var audioCursor: CMTime?
+    /// The microphone's format, so generated silence is indistinguishable from real buffers.
+    private var audioFormat: CMFormatDescription?
+
+    init(settings: CaptureSettings, queue: DispatchQueue, audioURL: URL, audioMuted: Bool) {
         self.settings = settings
         self.queue = queue
         self.audioURL = audioURL
+        self.audioMuted = audioMuted
         super.init()
+    }
+
+    /// Takes effect from the next buffer. Hops to `queue`, so it's safe from anywhere.
+    func setAudioMuted(_ muted: Bool) {
+        queue.async { [self] in audioMuted = muted }
     }
 
     // MARK: - Setup
@@ -156,6 +175,8 @@ final class SegmentRecorder: NSObject, @unchecked Sendable {
         self.videoSamples = 0
         self.audioSamples = 0
         self.audioDropped = 0
+        self.audioCursor = nil
+        self.audioFormat = nil
         self.sessionStartPTS = nil
         self.segmentCursor = .zero
         self.segmentOrigin = nil
@@ -222,20 +243,93 @@ final class SegmentRecorder: NSObject, @unchecked Sendable {
             guard let videoInput, videoInput.isReadyForMoreMediaData else { return }
             videoInput.append(sampleBuffer)
             videoSamples += 1
+            // Trail the video by a quarter second so silence never runs ahead of where the
+            // microphone's first real buffer will land when it's switched back on.
+            if audioMuted { fillSilence(until: pts - CMTime(value: 1, timescale: 4), minimum: 0.1) }
         } else {
+            // Buffers already in flight when mute was pressed are dropped, not written: mute
+            // means from the moment you pressed it.
+            guard !audioMuted else { return }
             guard let audioWriter, audioWriter.status == .writing,
                   let audioInput, audioInput.isReadyForMoreMediaData else {
                 audioDropped += 1
                 return
             }
+            if let format = CMSampleBufferGetFormatDescription(sampleBuffer) { audioFormat = format }
+            fillSilence(until: pts, minimum: 0.02)
+            // Overlap with silence already written would be out of order for the writer.
+            if let audioCursor, pts < audioCursor - CMTime(value: 1, timescale: 100) { return }
+            guard audioInput.isReadyForMoreMediaData else { audioDropped += 1; return }
             audioInput.append(sampleBuffer)
             audioSamples += 1
+            audioCursor = Self.end(of: sampleBuffer)
         }
 
         if isVideo, let start = sessionStartPTS {
             frameClock.withLock { _lastVideoSampleAt = Date() }
             delegate?.recorder(self, didAdvanceTo: pts - start)
         }
+    }
+
+    /// Writes silence from the end of the last audio to `end`, if the gap is at least `minimum`
+    /// seconds. Does nothing before the first real buffer: a leading gap is kept by the writer.
+    private func fillSilence(until end: CMTime, minimum: Double) {
+        guard let audioCursor, let audioFormat, (end - audioCursor).seconds >= minimum,
+              let audioInput, audioWriter?.status == .writing, audioInput.isReadyForMoreMediaData,
+              let silence = Self.makeSilence(from: audioCursor, to: end, like: audioFormat)
+        else { return }
+        audioInput.append(silence)
+        self.audioCursor = Self.end(of: silence)
+    }
+
+    /// Where an audio buffer ends, from its sample count rather than its duration field, which
+    /// capture doesn't always fill in.
+    private static func end(of buffer: CMSampleBuffer) -> CMTime {
+        let pts = CMSampleBufferGetPresentationTimeStamp(buffer)
+        guard let format = CMSampleBufferGetFormatDescription(buffer),
+              let rate = CMAudioFormatDescriptionGetStreamBasicDescription(format)?.pointee.mSampleRate,
+              rate > 0
+        else { return pts + CMSampleBufferGetDuration(buffer) }
+        return pts + CMTime(
+            value: CMTimeValue(CMSampleBufferGetNumSamples(buffer)), timescale: CMTimeScale(rate)
+        )
+    }
+
+    /// A buffer of zeroed linear PCM in the given format. Zero is silence for float and signed
+    /// integer samples, which is what the microphone delivers.
+    private static func makeSilence(
+        from start: CMTime, to end: CMTime, like format: CMFormatDescription
+    ) -> CMSampleBuffer? {
+        guard let asbd = CMAudioFormatDescriptionGetStreamBasicDescription(format)?.pointee,
+              asbd.mFormatID == kAudioFormatLinearPCM, asbd.mBytesPerFrame > 0, asbd.mSampleRate > 0
+        else { return nil }
+        let frames = Int(((end - start).seconds * asbd.mSampleRate).rounded(.down))
+        guard frames > 0 else { return nil }
+        let planes = asbd.mFormatFlags & kAudioFormatFlagIsNonInterleaved != 0
+            ? Int(asbd.mChannelsPerFrame) : 1
+        let length = frames * Int(asbd.mBytesPerFrame) * planes
+
+        var block: CMBlockBuffer?
+        guard CMBlockBufferCreateWithMemoryBlock(
+                allocator: nil, memoryBlock: nil, blockLength: length, blockAllocator: nil,
+                customBlockSource: nil, offsetToData: 0, dataLength: length,
+                flags: kCMBlockBufferAssureMemoryNowFlag, blockBufferOut: &block
+              ) == noErr,
+              let block,
+              CMBlockBufferFillDataBytes(
+                with: 0, blockBuffer: block, offsetIntoDestination: 0, dataLength: length
+              ) == noErr
+        else { return nil }
+
+        var buffer: CMSampleBuffer?
+        guard CMAudioSampleBufferCreateReadyWithPacketDescriptions(
+            allocator: nil, dataBuffer: block, formatDescription: format, sampleCount: frames,
+            presentationTimeStamp: CMTimeConvertScale(
+                start, timescale: Int32(asbd.mSampleRate), method: .roundHalfAwayFromZero
+            ),
+            packetDescriptions: nil, sampleBufferOut: &buffer
+        ) == noErr else { return nil }
+        return buffer
     }
 
     /// Runs `then` once `count` arrivals have been recorded, from whichever thread arrives last.
