@@ -2,9 +2,9 @@
 //
 //     swift Tools/MakeScreenshots.swift
 //
-// Reads AppStore/screenshots/*.png, writes AppStore/screenshots/final/NN-name.png at
-// 2868×1320 — the 6.9" iPhone landscape size, which App Store Connect scales down for every
-// smaller phone. Landscape throughout: the app is used sideways on a tripod, and a consistent
+// Reads AppStore/screenshots/*.png, writes AppStore/screenshots/final/<size>/NN-name.png in
+// landscape for both the 6.9" (2868×1320) and 6.5" (2778×1284) iPhone slots — App Store Connect
+// asks for one or the other depending on the account, so render both from one layout. Landscape throughout: the app is used sideways on a tripod, and a consistent
 // orientation keeps the gallery tidy.
 
 import AppKit
@@ -16,7 +16,11 @@ let root = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
 let out = root.appendingPathComponent("final")
 try? FileManager.default.createDirectory(at: out, withIntermediateDirectories: true)
 
-let canvas = CGSize(width: 2868, height: 1320)
+/// Output sizes. The layout is designed at 1320 px tall; smaller outputs scale it uniformly.
+let outputs: [(folder: String, pixels: CGSize)] = [
+    ("6.9-inch", CGSize(width: 2868, height: 1320)),
+    ("6.5-inch", CGSize(width: 2778, height: 1284)),
+]
 let yellow = NSColor(srgbRed: 1.0, green: 0.80, blue: 0.0, alpha: 1)
 
 struct Shot {
@@ -100,11 +104,17 @@ func cropped(_ image: CGImage, _ unit: CGRect) -> CGImage {
 
 // MARK: - Render
 
+for output in outputs {
+let layoutScale = output.pixels.height / 1320
+let canvas = CGSize(width: output.pixels.width / layoutScale, height: 1320)
+let folder = out.appendingPathComponent(output.folder)
+try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
 for slide in slides {
     // Opaque on purpose: App Store Connect rejects screenshots with an alpha channel.
-    let ctx = CGContext(data: nil, width: Int(canvas.width), height: Int(canvas.height), bitsPerComponent: 8,
+    let ctx = CGContext(data: nil, width: Int(output.pixels.width), height: Int(output.pixels.height), bitsPerComponent: 8,
                         bytesPerRow: 0, space: CGColorSpace(name: CGColorSpace.sRGB)!,
                         bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue)!
+    ctx.scaleBy(x: layoutScale, y: layoutScale)
     NSGraphicsContext.current = NSGraphicsContext(cgContext: ctx, flipped: false)
 
     // Background: near-black with a faint warm glow behind the caption.
@@ -188,9 +198,10 @@ for slide in slides {
                  options: [.usesLineFragmentOrigin])
 
     NSGraphicsContext.current = nil
-    let url = out.appendingPathComponent("\(slide.name).png")
+    let url = folder.appendingPathComponent("\(slide.name).png")
     let dest = CGImageDestinationCreateWithURL(url as CFURL, "public.png" as CFString, 1, nil)!
     CGImageDestinationAddImage(dest, ctx.makeImage()!, nil)
     CGImageDestinationFinalize(dest)
-    print("wrote \(url.lastPathComponent)  caption column \(Int(columnWidth))px")
+    print("wrote \(output.folder)/\(url.lastPathComponent)")
+}
 }
